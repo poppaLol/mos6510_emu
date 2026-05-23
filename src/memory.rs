@@ -10,7 +10,8 @@ pub struct C64Memory {
     pub ram: [u8; 0x10000],
     pub basic_rom: [u8; 0x2000],
     pub char_rom: [u8; 0x1000],
-    pub kernel_rom: [u8; 0x2000]
+    pub kernel_rom: [u8; 0x2000],
+    pub trace: bool
 }
 
 
@@ -37,7 +38,8 @@ impl C64Memory {
         ram: _ram_memory,
         basic_rom: b_rombuffer,
         char_rom: charbuffer,
-        kernel_rom: k_rombuffer
+        kernel_rom: k_rombuffer,
+        trace: true
     }
   }
 
@@ -47,13 +49,14 @@ impl C64Memory {
           ram: [0; 0x10000],
           basic_rom: [0; 0x2000],
           char_rom: [0; 0x1000],
-          kernel_rom: [0; 0x2000]
+          kernel_rom: [0; 0x2000],
+          trace: false
       }
   }
 
 
   fn read_ram_byte(&self, address: u16) -> u8 {
-    print!("{:#02x} ", self.ram[address as usize]);
+    if self.trace { print!("{:#02x} ", self.ram[address as usize]); }
     self.ram[address as usize]
   }
   
@@ -63,7 +66,7 @@ impl C64Memory {
   }
   
   fn read_basic_rom_byte(&self, address: u16) -> u8 {
-    print!("{:#02x} ", self.basic_rom[address as usize]);
+    if self.trace { print!("{:#02x} ", self.basic_rom[address as usize]); }
     self.basic_rom[address as usize]
   }
   
@@ -73,7 +76,7 @@ impl C64Memory {
   }
   
   fn read_char_rom_byte(&self, address: u16) -> u8 {
-    print!("{:#02x} ", self.char_rom[address as usize]);
+    if self.trace { print!("{:#02x} ", self.char_rom[address as usize]); }
     self.char_rom[address as usize]
   }
   
@@ -83,7 +86,7 @@ impl C64Memory {
   }
   
   fn read_kern_rom_byte(&self, address: u16) -> u8 {
-    print!("{:#02x} ", self.kernel_rom[address as usize]);
+    if self.trace { print!("{:#02x} ", self.kernel_rom[address as usize]); }
     self.kernel_rom[address as usize]
   }
   
@@ -143,7 +146,7 @@ impl C64Memory {
   }
 
   pub fn write_byte(&mut self, pointer: &usize, value: u8) {
-    print!(" ------  write ({:#02x}) at: {:#04x}", value, pointer);
+    if self.trace { print!(" ------  write ({:#02x}) at: {:#04x}", value, pointer); }
     self.ram[*pointer] = value;
   }
 

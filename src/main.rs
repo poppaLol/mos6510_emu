@@ -9,11 +9,121 @@ use flags::{ Flags, AddressingMode, get_mode};
 use proc::{Mos6510, ProcDelta};
 use memory::C64Memory;
 use std::num::Wrapping;
+use std::collections::VecDeque;
+use std::env;
+use std::panic::{self, AssertUnwindSafe};
 use round::round_down;
 use tokio::time;
 
 const UPPER_BIT_POS: u8 = 0b10000000;
 const LOWER_BIT_POS: u8 = 0b00000001;
+const DEFAULT_TRACE_TAIL: usize = 20;
+
+struct BootOptions {
+    max_instructions: Option<usize>,
+    trace_tail: usize,
+}
+
+#[derive(Copy, Clone)]
+struct TraceEntry {
+    index: usize,
+    pc: u16,
+    op_code: u8,
+    accumulator: u8,
+    x_index: u8,
+    y_index: u8,
+    stack_pointer: u8,
+    processor_status: u8,
+    cycles_count: usize,
+}
+
+impl TraceEntry {
+    fn from_cpu(index: usize, op_code: u8, proc: &Mos6510) -> TraceEntry {
+        TraceEntry {
+            index,
+            pc: proc.program_counter,
+            op_code,
+            accumulator: proc.accumulator,
+            x_index: proc.x_index,
+            y_index: proc.y_index,
+            stack_pointer: proc.stack_pointer,
+            processor_status: proc.processor_status.bits(),
+            cycles_count: proc.cycles_count,
+        }
+    }
+}
+
+fn parse_boot_options() -> BootOptions {
+    let mut max_instructions = None;
+    let mut trace_tail = DEFAULT_TRACE_TAIL;
+    let mut args = env::args().skip(1);
+
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--max-instructions" => {
+                let value = args.next().unwrap_or_else(|| {
+                    panic!("--max-instructions requires a value");
+                });
+                max_instructions = Some(value.parse::<usize>().unwrap_or_else(|_| {
+                    panic!("invalid --max-instructions value: {}", value);
+                }));
+            },
+            "--trace-tail" => {
+                let value = args.next().unwrap_or_else(|| {
+                    panic!("--trace-tail requires a value");
+                });
+                trace_tail = value.parse::<usize>().unwrap_or_else(|_| {
+                    panic!("invalid --trace-tail value: {}", value);
+                });
+            },
+            _ => panic!("unknown argument: {}", arg),
+        }
+    }
+
+    BootOptions { max_instructions, trace_tail }
+}
+
+fn remember_trace(trace: &mut VecDeque<TraceEntry>, entry: TraceEntry, max_len: usize) {
+    if max_len == 0 {
+        return;
+    }
+    if trace.len() == max_len {
+        trace.pop_front();
+    }
+    trace.push_back(entry);
+}
+
+fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
+    if trace.is_empty() {
+        return;
+    }
+
+    println!("Recent instruction trace:");
+    for entry in trace {
+        println!(
+            "#{:<6} PC={:#06x} OP={:#04x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} SR={:#04x} CC={}",
+            entry.index,
+            entry.pc,
+            entry.op_code,
+            entry.accumulator,
+            entry.x_index,
+            entry.y_index,
+            entry.stack_pointer,
+            entry.processor_status,
+            entry.cycles_count
+        );
+    }
+}
+
+fn panic_summary(error: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = error.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = error.downcast_ref::<&str>() {
+        message.to_string()
+    } else {
+        "unknown panic".to_string()
+    }
+}
 
 fn set_proc_status(flag_mask: Flags, value: u8, wrapping: Option<u8>, overflow_tuple: (u8,u8), mut proc: Mos6510) -> Mos6510 {
     if flag_mask.contains(Flags::N_FLAG) {
@@ -639,9 +749,7 @@ fn rts(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
 }
 
 
-fn process_control_loop(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
-    print!("{:#06x} ", proc.program_counter);
-    let op_code = memory.read_byte(proc.program_counter);
+fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memory, Mos6510) {
     proc = ProcDelta::empty()
             .with_address_mode(get_mode(&op_code))
             .apply_proc_delta(proc);
@@ -714,12 +822,24 @@ fn process_control_loop(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos
 }
 
 
+#[allow(dead_code)]
+fn process_control_loop(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+    print!("{:#06x} ", proc.program_counter);
+    let op_code = memory.read_byte(proc.program_counter);
+    execute_opcode(memory, proc, op_code)
+}
+
+
 #[tokio::main]
 async fn main() {
+    let options = parse_boot_options();
     let mut memory = C64Memory::init_memory(
         "rom/64c.251913-01.bin",
         "rom/characters.901225-01.bin"
     );
+    if options.max_instructions.is_some() {
+        memory.trace = false;
+    }
     let pc = memory.read_word(0xFFFC);
     let mut proc = ProcDelta::empty()
         .with_program_counter(pc)
@@ -731,18 +851,54 @@ async fn main() {
 
     let mut interval = time::interval(time::Duration::from_nanos(pal_duration));
     let mut i = 0;
+    let mut trace = VecDeque::with_capacity(options.trace_tail);
     loop {
-        println!("({})", i);
-        interval.tick().await;
-        let res = process_control_loop(memory, proc);
-        memory = res.0;
-        proc = res.1;
+        if let Some(max_instructions) = options.max_instructions {
+            if i >= max_instructions {
+                println!(
+                    "Checkpoint: reached --max-instructions={} at PC={:#06x}, cycles={}",
+                    max_instructions,
+                    proc.program_counter,
+                    proc.cycles_count
+                );
+                print_trace_tail(&trace);
+                break;
+            }
+        }
+
+        if options.max_instructions.is_none() {
+            println!("({})", i);
+            interval.tick().await;
+            print!("{:#06x} ", proc.program_counter);
+        }
+
+        let op_code = memory.read_byte(proc.program_counter);
+        remember_trace(&mut trace, TraceEntry::from_cpu(i, op_code, &proc), options.trace_tail);
+        let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(memory, proc, op_code)));
+        match execution {
+            Ok(res) => {
+                memory = res.0;
+                proc = res.1;
+            },
+            Err(error) => {
+                println!(
+                    "Stopped after {} instructions at PC={:#06x}: {}",
+                    i,
+                    proc.program_counter,
+                    panic_summary(error)
+                );
+                print_trace_tail(&trace);
+                break;
+            }
+        }
         
         //dbg!(proc);
         i+=1;
-        print!(" ----- AddressMode {:?}", proc.addressing_mode);
-        if i > 5 && proc.stack_pointer < 1 {
-            println!("Warning - stack pointer {}", proc.stack_pointer);
+        if options.max_instructions.is_none() {
+            print!(" ----- AddressMode {:?}", proc.addressing_mode);
+            if i > 5 && proc.stack_pointer < 1 {
+                println!("Warning - stack pointer {}", proc.stack_pointer);
+            }
         }
     }
 }

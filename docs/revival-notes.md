@@ -106,6 +106,37 @@ cargo test
 250 passed; 0 failed
 ```
 
+## Boot Harness
+
+The executable now has a bounded checkpoint mode for making KERNAL startup progress easier to inspect:
+
+```text
+cargo run -- --max-instructions 29060 --trace-tail 24
+```
+
+In bounded mode, legacy per-read/write tracing is disabled and the runner prints a compact tail of recent CPU state when it reaches the instruction limit or hits an emulator panic. The default interactive mode remains available when no limit is passed.
+
+The trace around `0xFD6E..0xFD84` currently looks like the KERNAL RAM test loop rather than a hard lock:
+
+```text
+FD6E: LDA ($C1),Y
+FD70: TAX
+FD71: LDA #$55
+FD73: STA ($C1),Y
+FD75: CMP ($C1),Y
+FD77: BNE ...
+FD79: ROL A
+FD7A: STA ($C1),Y
+FD7C: CMP ($C1),Y
+FD7E: BNE ...
+FD80: TXA
+FD81: STA ($C1),Y
+FD83: INY
+FD84: BNE ...
+```
+
+The important sign of progress is that `Y` advances through the loop. Around the observed checkpoint, the runner shows `Y` moving from `0xB9` to `0xBA`, while the program counter cycles through the same RAM-test routine. The next useful harness improvement is a target-PC or target-range stop so the boot path can be followed from milestone to milestone without guessing instruction counts.
+
 ## Known Technical Risks
 
 These are the main correctness risks identified while reading the code.
