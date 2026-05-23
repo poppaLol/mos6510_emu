@@ -289,7 +289,7 @@ fn when_adc_addr_mode_xzeropage_program_counter_inc_by_2() {
 }
 
 #[test]
-fn when_adc_addr_mode_xzeropage_and_page_boundary_crossed_cycles_inc_by_5() {
+fn when_adc_addr_mode_xzeropage_wraps_without_page_boundary_penalty() {
   let mut mem = C64Memory::get_empty_mem();
   let mut cpu = get_cpu();
   cpu.program_counter = 0x2FFD;
@@ -299,7 +299,7 @@ fn when_adc_addr_mode_xzeropage_and_page_boundary_crossed_cycles_inc_by_5() {
   mem.ram[0x2FFE] = 0xFF;
   mem.ram[0xFFE + 0xFF] = 1;
   let res = adc(mem,cpu);
-  assert_eq!(res.1.cycles_count, 5)
+  assert_eq!(res.1.cycles_count, 4)
 }
 
 #[test]

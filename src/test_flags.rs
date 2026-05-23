@@ -13,6 +13,23 @@ fn status_flags_use_6502_bit_layout() {
 }
 
 #[test]
+fn page_crossing_uses_256_byte_pages() {
+  assert_eq!(AddressingMode::XAbsolute.crossed_page_boundary(0x01FF, 0x0200), 1);
+  assert_eq!(AddressingMode::XAbsolute.crossed_page_boundary(0x0FFE, 0x0FFF), 0);
+}
+
+#[test]
+fn yindirect_page_crossing_uses_256_byte_pages() {
+  assert_eq!(AddressingMode::YIndirect.crossed_page_boundary_indy(0x01FF, 0x0200), 1);
+  assert_eq!(AddressingMode::YIndirect.crossed_page_boundary_indy(0x0FFE, 0x0FFF), 0);
+}
+
+#[test]
+fn zero_page_indexed_modes_do_not_add_page_crossing_penalties() {
+  assert_eq!(AddressingMode::XZeroPage.crossed_page_boundary_xzero(0x00FF, 0x0100), 0);
+}
+
+#[test]
 fn all_are_implied() {
   let op_codes = [ 0xCA,  0x88,  0xE8,  0xC8,  0x0A,  0x2A,  0x4A,  0x6A,  0xAA,  
       0x8A,  0xA8,  0x98,  0xBA,  0x9A,  0x68,  0x48,  0x28,  0x08,  0x00,  0x40,  

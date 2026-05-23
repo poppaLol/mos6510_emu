@@ -42,6 +42,13 @@ pub enum AddressingMode {
 }
 
 impl AddressingMode {
+  fn page_crossed(base_address: u16, final_address: u16) -> usize {
+    match (base_address & 0xFF00) == (final_address & 0xFF00) {
+      true => 0,
+      false => 1,
+    }
+  }
+
   pub fn bytes_increment(&self) -> u16 {
     match self {
       AddressingMode::Implied => 1,
@@ -80,11 +87,8 @@ impl AddressingMode {
     //this condition may need expansion later
     match self {
       AddressingMode::Relative | AddressingMode::XAbsolute | AddressingMode::YAbsolute => {
-        match (base_address >> 12) == (final_address >> 12) {
-          true => 0,
-          false => 1,
-        }
-      }
+        AddressingMode::page_crossed(base_address, final_address)
+      },
       _ => 0,
     }
   }
@@ -93,11 +97,8 @@ impl AddressingMode {
     //this condition may need expansion later
     match self {
       AddressingMode::XAbsolute | AddressingMode::YIndirect | AddressingMode::YAbsolute => {
-        match (base_address >> 12) == (final_address >> 12) {
-          true => 0,
-          false => 1,
-        }
-      }
+        AddressingMode::page_crossed(base_address, final_address)
+      },
       _ => 0,
     }
   }
@@ -107,11 +108,7 @@ impl AddressingMode {
     match self {
       AddressingMode::XAbsolute
       | AddressingMode::YIndirect
-      | AddressingMode::XZeroPage
-      | AddressingMode::YAbsolute => match (base_address >> 12) == (final_address >> 12) {
-        true => 0,
-        false => 1,
-      },
+      | AddressingMode::YAbsolute => AddressingMode::page_crossed(base_address, final_address),
       _ => 0,
     }
   }
