@@ -3,6 +3,7 @@ extern crate bitflags;
 extern crate byte;
 
 mod flags;
+mod cia;
 mod memory;
 mod proc;
 mod screen;
@@ -26,6 +27,10 @@ struct BootOptions {
     max_instructions: Option<usize>,
     trace_tail: usize,
     screen: bool,
+    stop_on_brk: bool,
+    stop_outside_rom: bool,
+    stop_pc: Option<u16>,
+    stop_pc_range: Option<(u16, u16)>,
 }
 
 #[derive(Copy, Clone)]
@@ -41,6 +46,9 @@ struct TraceEntry {
     stack_pointer: u8,
     processor_status: u8,
     cycles_count: usize,
+    memory_latch: u8,
+    cia2_port_a: u8,
+    cia2_data_direction_a: u8,
 }
 
 impl TraceEntry {
@@ -59,7 +67,22 @@ impl TraceEntry {
             stack_pointer: proc.stack_pointer,
             processor_status: proc.processor_status.bits(),
             cycles_count: proc.cycles_count,
+            memory_latch: memory.ram[1],
+            cia2_port_a: memory.cia2.read_byte(0xDD00),
+            cia2_data_direction_a: memory.cia2.read_byte(0xDD02),
         }
+    }
+}
+
+fn parse_u16_arg(value: &str, name: &str) -> u16 {
+    if let Some(hex_value) = value.strip_prefix("0x") {
+        u16::from_str_radix(hex_value, 16).unwrap_or_else(|_| {
+            panic!("invalid {} value: {}", name, value);
+        })
+    } else {
+        value.parse::<u16>().unwrap_or_else(|_| {
+            panic!("invalid {} value: {}", name, value);
+        })
     }
 }
 
@@ -67,12 +90,22 @@ fn parse_boot_options() -> BootOptions {
     let mut max_instructions = None;
     let mut trace_tail = DEFAULT_TRACE_TAIL;
     let mut screen = false;
+    let mut stop_on_brk = false;
+    let mut stop_outside_rom = false;
+    let mut stop_pc = None;
+    let mut stop_pc_range = None;
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--screen" => {
                 screen = true;
+            },
+            "--stop-on-brk" => {
+                stop_on_brk = true;
+            },
+            "--stop-outside-rom" => {
+                stop_outside_rom = true;
             },
             "--max-instructions" => {
                 let value = args.next().unwrap_or_else(|| {
@@ -90,11 +123,37 @@ fn parse_boot_options() -> BootOptions {
                     panic!("invalid --trace-tail value: {}", value);
                 });
             },
+            "--stop-pc" => {
+                let value = args.next().unwrap_or_else(|| {
+                    panic!("--stop-pc requires a value");
+                });
+                stop_pc = Some(parse_u16_arg(&value, "--stop-pc"));
+            },
+            "--stop-pc-range" => {
+                let start = args.next().unwrap_or_else(|| {
+                    panic!("--stop-pc-range requires a start value");
+                });
+                let end = args.next().unwrap_or_else(|| {
+                    panic!("--stop-pc-range requires an end value");
+                });
+                stop_pc_range = Some((
+                    parse_u16_arg(&start, "--stop-pc-range start"),
+                    parse_u16_arg(&end, "--stop-pc-range end"),
+                ));
+            },
             _ => panic!("unknown argument: {}", arg),
         }
     }
 
-    BootOptions { max_instructions, trace_tail, screen }
+    BootOptions {
+        max_instructions,
+        trace_tail,
+        screen,
+        stop_on_brk,
+        stop_outside_rom,
+        stop_pc,
+        stop_pc_range,
+    }
 }
 
 fn print_screen_snapshot(memory: &C64Memory, options: &BootOptions) {
@@ -122,7 +181,7 @@ fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
     println!("Recent instruction trace:");
     for entry in trace {
         println!(
-            "#{:<6} PC={:#06x} OP={:#04x} PTR_C1={:#06x} EFF_C1Y={:#06x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} SR={:#04x} CC={}",
+            "#{:<6} PC={:#06x} OP={:#04x} PTR_C1={:#06x} EFF_C1Y={:#06x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} SR={:#04x} LATCH={:#04x} DD00={:#04x} DD02={:#04x} CC={}",
             entry.index,
             entry.pc,
             entry.op_code,
@@ -133,9 +192,20 @@ fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
             entry.y_index,
             entry.stack_pointer,
             entry.processor_status,
+            entry.memory_latch,
+            entry.cia2_port_a,
+            entry.cia2_data_direction_a,
             entry.cycles_count
         );
     }
+}
+
+fn is_rom_address(address: u16) -> bool {
+    matches!(address, 0xA000..=0xBFFF | 0xE000..=0xFFFF)
+}
+
+fn is_ram_code_address(address: u16) -> bool {
+    matches!(address, 0x0200..=0x9FFF | 0xC000..=0xCFFF)
 }
 
 fn panic_summary(error: Box<dyn std::any::Any + Send>) -> String {
@@ -899,6 +969,7 @@ async fn main() {
     let mut interval = time::interval(time::Duration::from_nanos(pal_duration));
     let mut i = 0;
     let mut trace = VecDeque::with_capacity(options.trace_tail);
+    let mut has_entered_rom = is_rom_address(proc.program_counter);
     loop {
         if let Some(max_instructions) = options.max_instructions {
             if i >= max_instructions {
@@ -922,11 +993,67 @@ async fn main() {
 
         let op_code = memory.read_byte(proc.program_counter);
         remember_trace(&mut trace, TraceEntry::from_cpu(i, op_code, &memory, &proc), options.trace_tail);
+
+        if options.stop_on_brk && op_code == 0x00 {
+            println!(
+                "Checkpoint: stopped on BRK opcode at instruction {} PC={:#06x}, cycles={}",
+                i,
+                proc.program_counter,
+                proc.cycles_count
+            );
+            print_trace_tail(&trace);
+            print_screen_snapshot(&memory, &options);
+            break;
+        }
+
+        if let Some(stop_pc) = options.stop_pc {
+            if proc.program_counter == stop_pc {
+                println!(
+                    "Checkpoint: reached --stop-pc {:#06x} at instruction {}, cycles={}",
+                    stop_pc,
+                    i,
+                    proc.cycles_count
+                );
+                print_trace_tail(&trace);
+                print_screen_snapshot(&memory, &options);
+                break;
+            }
+        }
+
+        if let Some((start, end)) = options.stop_pc_range {
+            if proc.program_counter >= start && proc.program_counter <= end {
+                println!(
+                    "Checkpoint: reached --stop-pc-range {:#06x}..={:#06x} at PC={:#06x}, instruction {}, cycles={}",
+                    start,
+                    end,
+                    proc.program_counter,
+                    i,
+                    proc.cycles_count
+                );
+                print_trace_tail(&trace);
+                print_screen_snapshot(&memory, &options);
+                break;
+            }
+        }
+
+        if options.stop_outside_rom && has_entered_rom && is_ram_code_address(proc.program_counter) {
+            println!(
+                "Checkpoint: stopped outside ROM at instruction {} PC={:#06x}, cycles={}",
+                i,
+                proc.program_counter,
+                proc.cycles_count
+            );
+            print_trace_tail(&trace);
+            print_screen_snapshot(&memory, &options);
+            break;
+        }
+
         let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(memory, proc, op_code)));
         match execution {
             Ok(res) => {
                 memory = res.0;
                 proc = res.1;
+                has_entered_rom = has_entered_rom || is_rom_address(proc.program_counter);
             },
             Err(error) => {
                 println!(

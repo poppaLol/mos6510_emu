@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Read;
+use crate::cia::Cia;
 use crate::vic::VicII;
 
 const BASIC_ROM_OFFSET: u16 = 0xA000;
@@ -13,6 +14,8 @@ pub struct C64Memory {
     pub char_rom: [u8; 0x1000],
     pub kernel_rom: [u8; 0x2000],
     pub vic: VicII,
+    pub cia1: Cia,
+    pub cia2: Cia,
     pub trace: bool
 }
 
@@ -42,6 +45,8 @@ impl C64Memory {
         char_rom: charbuffer,
         kernel_rom: k_rombuffer,
         vic: VicII::new(),
+        cia1: Cia::new_cia1(),
+        cia2: Cia::new_cia2(),
         trace: true
     }
   }
@@ -54,6 +59,8 @@ impl C64Memory {
           char_rom: [0; 0x1000],
           kernel_rom: [0; 0x2000],
           vic: VicII::new(),
+          cia1: Cia::new_cia1(),
+          cia2: Cia::new_cia2(),
           trace: false
       }
   }
@@ -102,6 +109,8 @@ impl C64Memory {
   fn read_io_byte(&self, address: u16) -> u8 {
     match address {
       0xD000..=0xD3FF => self.vic.read_byte(address),
+      0xDC00..=0xDCFF => self.cia1.read_byte(address),
+      0xDD00..=0xDDFF => self.cia2.read_byte(address),
       _ => self.read_ram_byte(address)
     }
   }
@@ -165,6 +174,8 @@ impl C64Memory {
     if self.trace { print!(" ------  write ({:#02x}) at: {:#04x}", value, pointer); }
     match *pointer {
       0xD000..=0xD3FF => self.vic.write_byte(*pointer as u16, value),
+      0xDC00..=0xDCFF => self.cia1.write_byte(*pointer as u16, value),
+      0xDD00..=0xDDFF => self.cia2.write_byte(*pointer as u16, value),
       _ => self.ram[*pointer] = value
     }
   }
@@ -252,6 +263,60 @@ mod tests {
     mem.vic.write_byte(0xD012, 0x66);
 
     assert_eq!(mem.read_byte(0xD012), 0x00);
+  }
+
+  #[test]
+  fn io_reads_expose_cia_registers_when_charen_set() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+
+    assert_eq!(mem.read_byte(0xDC00), 0xFF);
+    assert_eq!(mem.read_byte(0xDD00), 0xFF);
+  }
+
+  #[test]
+  fn io_writes_update_cia_registers_when_charen_set() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+
+    mem.write_byte(&0xDD02, 0xFF);
+    mem.write_byte(&0xDD00, 0x7F);
+
+    assert_eq!(mem.read_byte(0xDD00), 0x7F);
+    assert_eq!(mem.ram[0xDD00], 0x00);
+  }
+
+  #[test]
+  fn cia1_port_input_bits_read_high_when_data_direction_bits_are_clear() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+
+    mem.write_byte(&0xDC02, 0x3F);
+    mem.write_byte(&0xDC00, 0x0F);
+
+    assert_eq!(mem.read_byte(0xDC00), 0xCF);
+  }
+
+  #[test]
+  fn cia2_iec_input_bits_follow_released_output_lines() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+
+    mem.write_byte(&0xDD02, 0x3F);
+    mem.write_byte(&0xDD00, 0x00);
+
+    assert_eq!(mem.read_byte(0xDD00), 0xC0);
+  }
+
+  #[test]
+  fn cia2_iec_input_bits_follow_pulled_low_output_lines() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+
+    mem.write_byte(&0xDD02, 0x3F);
+    mem.write_byte(&0xDD00, 0x30);
+
+    assert_eq!(mem.read_byte(0xDD00), 0x30);
   }
 
   #[test]

@@ -181,6 +181,10 @@ The memory map currently treats much of the I/O space as RAM or ROM and simply r
 - keyboard-related reads;
 - possibly SID registers as writable sinks.
 
+The first CIA step is now in place. `$DC00..$DCFF` and `$DD00..$DDFF` route to CIA1 and CIA2 register files instead of falling through to RAM. The port registers honor their data-direction registers: output bits read from the output latch, input bits read from external pins. With no keyboard, joystick, or serial device attached, those external pins default high.
+
+CIA2 port A has one extra boot-critical behavior: its IEC serial output bits are inverted before the bus. For PA4/PA5, an output latch bit of `0` releases the clock/data line high, while `1` actively pulls it low. The KERNAL serial routines around `$ED40..$EEB2` rely on that polarity when polling `$DD00`.
+
 ## Recommended Direction
 
 The next phase should make the CPU and memory foundations trustworthy before chasing full C64 behavior.
