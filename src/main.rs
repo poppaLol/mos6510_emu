@@ -828,9 +828,11 @@ fn clv(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
 }
 
 fn jsr(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
-    let rts = proc.program_counter + 3;
+    let rts = proc.program_counter + 2;
     proc.program_counter = memory.read_word(proc.program_counter + 1);
-    stack_push_word(memory, proc, rts)
+    let mut res = stack_push_word(memory, proc, rts);
+    res.1.cycles_count += 6;
+    res
 }
 
 
@@ -860,7 +862,8 @@ fn rts(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
     let target_address = stack_read_word(memory, proc);
     let delta = ProcDelta::empty()
         .with_stack_pointer(proc.stack_pointer.wrapping_add(2))
-        .with_program_counter(target_address);
+        .with_program_counter(target_address.wrapping_add(1))
+        .with_cycles_count(6);
     (memory, delta.apply_proc_delta(proc))
 }
 
