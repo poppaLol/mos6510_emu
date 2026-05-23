@@ -1,35 +1,35 @@
 use std::fs::File;
 use std::io::Read;
 
-const BASIC_ROM_OFFSET: u16 = 0x9FFF;
-const CHAR_ROM_OFFSET: u16 = 0xCFFF;
-const KERN_ROM_OFFSET: u16 = 0xDFFF;
+const BASIC_ROM_OFFSET: u16 = 0xA000;
+const CHAR_ROM_OFFSET: u16 = 0xD000;
+const KERN_ROM_OFFSET: u16 = 0xE000;
 
 #[derive(Debug, Copy, Clone)]
 pub struct C64Memory {
-    pub ram: [u8; 0xFFFF],
-    pub basic_rom: [u8; 0x1FFF],
-    pub char_rom: [u8; 0x0FFF],
-    pub kernel_rom: [u8; 0x1FFF]
+    pub ram: [u8; 0x10000],
+    pub basic_rom: [u8; 0x2000],
+    pub char_rom: [u8; 0x1000],
+    pub kernel_rom: [u8; 0x2000]
 }
 
 
 impl C64Memory {
   pub fn init_memory(rom_file_path: &str, char_file_path: &str) -> C64Memory {
     let mut _romfile=File::open(rom_file_path).unwrap();
-    let mut b_rombuffer = [0; 0x1FFF];
-    _romfile.read(&mut b_rombuffer).unwrap();
+    let mut b_rombuffer = [0; 0x2000];
+    _romfile.read_exact(&mut b_rombuffer).unwrap();
     
-    let mut k_rombuffer = [0; 0x1FFF];
-    _romfile.read(&mut k_rombuffer).unwrap();
+    let mut k_rombuffer = [0; 0x2000];
+    _romfile.read_exact(&mut k_rombuffer).unwrap();
   
     assert!(k_rombuffer[(0xEA0E - KERN_ROM_OFFSET) as usize] == 0x88);
   
     let mut _charfile=File::open(char_file_path).unwrap();
-    let mut charbuffer = [0; 0x0FFF];
-    _charfile.read(&mut charbuffer).unwrap();
+    let mut charbuffer = [0; 0x1000];
+    _charfile.read_exact(&mut charbuffer).unwrap();
   
-    let mut _ram_memory: [u8; 0xFFFF] = [0; 0xFFFF];
+    let mut _ram_memory: [u8; 0x10000] = [0; 0x10000];
     _ram_memory[0] = 0x2F; //io bits default 0b00101111 read
     _ram_memory[1] = 0x37; //latch bits default 0b00110111 
   
@@ -44,10 +44,10 @@ impl C64Memory {
   #[allow(dead_code)]
   pub fn get_empty_mem() -> C64Memory {
       C64Memory{
-          ram: [0; 0xFFFF],
-          basic_rom: [0; 0x1FFF],
-          char_rom: [0; 0x0FFF],
-          kernel_rom: [0; 0x1FFF]
+          ram: [0; 0x10000],
+          basic_rom: [0; 0x2000],
+          char_rom: [0; 0x1000],
+          kernel_rom: [0; 0x2000]
       }
   }
 
@@ -183,6 +183,43 @@ impl C64Memory {
 mod tests {
   use super::C64Memory;
   // Note this useful idiom: importing names from outer (for mod tests) scope.
+
+  #[test]
+  fn memory_regions_have_expected_sizes() {
+    let mem = C64Memory::get_empty_mem();
+
+    assert_eq!(mem.ram.len(), 0x10000);
+    assert_eq!(mem.basic_rom.len(), 0x2000);
+    assert_eq!(mem.char_rom.len(), 0x1000);
+    assert_eq!(mem.kernel_rom.len(), 0x2000);
+  }
+
+  #[test]
+  fn can_write_to_last_ram_address() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.write_byte(&0xFFFF, 0xAA);
+
+    assert_eq!(mem.ram[0xFFFF], 0xAA)
+  }
+
+  #[test]
+  fn rom_reads_map_first_and_last_bytes() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+    mem.basic_rom[0] = 0xA0;
+    mem.basic_rom[0x1FFF] = 0xBF;
+    mem.char_rom[0] = 0xD0;
+    mem.char_rom[0x0FFF] = 0xDF;
+    mem.kernel_rom[0] = 0xE0;
+    mem.kernel_rom[0x1FFF] = 0xFF;
+
+    assert_eq!(mem.read_byte(0xA000), 0xA0);
+    assert_eq!(mem.read_byte(0xBFFF), 0xBF);
+    assert_eq!(mem.read_byte(0xD000), 0xD0);
+    assert_eq!(mem.read_byte(0xDFFF), 0xDF);
+    assert_eq!(mem.read_byte(0xE000), 0xE0);
+    assert_eq!(mem.read_byte(0xFFFF), 0xFF);
+  }
 
   #[test]
   fn can_push_byte_to_stack() {
