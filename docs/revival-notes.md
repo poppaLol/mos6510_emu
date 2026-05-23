@@ -79,34 +79,28 @@ In the current working tree, memory region sizing has also been corrected:
 - ROM mapping offsets now use the mapped starts: `0xA000`, `0xD000`, and `0xE000`.
 - Boundary tests cover first and last mapped ROM bytes plus writes to RAM address `0xFFFF`.
 
+Zero-page wrapping has also been corrected:
+
+- `ZeroPage,X` and `ZeroPage,Y` now wrap inside `$00..$FF`.
+- `(zp,X)` wraps after adding X to the operand.
+- Zero-page pointer word reads wrap the high byte from `$FF` back to `$00`.
+- `(zp),Y` now uses the wrapped zero-page pointer read before adding Y.
+- Addressing-level regression tests cover these wraparound cases directly.
+
 The suite was green after these changes:
 
 ```text
 cargo test
-240 passed; 0 failed
+245 passed; 0 failed
 ```
 
 ## Known Technical Risks
 
 These are the main correctness risks identified while reading the code.
 
-### Zero-Page Wrapping
-
-Indexed zero-page addressing should wrap inside `$00..$FF`.
-
-Current address calculation widens to `u16` and can run past zero page:
-
-```rust
-memory.read_byte(proc.program_counter + 1) as u16 + proc.x_index as u16
-```
-
-This affects `ZeroPage,X`, `ZeroPage,Y`, `(zp,X)`, and zero-page pointer reads near `$FF`.
-
 ### Indirect Addressing Details
 
-`YIndirect` has been fixed for the simple case, but the emulator still needs proper zero-page wrapping for pointer reads.
-
-`XIndirect` also needs a careful audit. It should add X to the operand in zero page, wrap there, then read a little-endian pointer from that zero-page address.
+`XIndirect` and `YIndirect` now use wrapped zero-page pointer reads, but the broader indirect-addressing behavior still deserves a careful audit against a 6502 reference.
 
 `JMP (addr)` on the original 6502 has the famous page-boundary indirect bug. A C64-compatible emulator may need to reproduce it.
 
@@ -147,19 +141,18 @@ The memory map currently treats much of the I/O space as RAM or ROM and simply r
 
 The next phase should make the CPU and memory foundations trustworthy before chasing full C64 behavior.
 
-1. Add correct zero-page wrapping and regression tests.
-2. Fix 256-byte page-crossing detection and update affected cycle tests.
-3. Audit `XIndirect`, `YIndirect`, and `Indirect` addressing against 6502 behavior.
-4. Split `main.rs` into smaller modules:
+1. Fix 256-byte page-crossing detection and update affected cycle tests.
+2. Audit `XIndirect`, `YIndirect`, and `Indirect` addressing against 6502 behavior.
+3. Split `main.rs` into smaller modules:
    - `cpu.rs`
    - `addressing.rs`
    - `instructions.rs`
    - `machine.rs`
    - a small `main.rs` runner
-5. Replace direct `print!` calls in memory and execution with a structured trace mode.
-6. Add a trace format that prints registers, status, PC, opcode, effective address, and cycle count.
-7. Compare traces against known-good 6502/6510 references or test ROMs.
-8. Add minimal C64 device behavior only after CPU/memory behavior is less ambiguous.
+4. Replace direct `print!` calls in memory and execution with a structured trace mode.
+5. Add a trace format that prints registers, status, PC, opcode, effective address, and cycle count.
+6. Compare traces against known-good 6502/6510 references or test ROMs.
+7. Add minimal C64 device behavior only after CPU/memory behavior is less ambiguous.
 
 ## Working Style
 

@@ -44,6 +44,16 @@ fn set_proc_status(flag_mask: Flags, value: u8, wrapping: Option<u8>, overflow_t
 }
 
 
+fn zero_page_add(base: u8, offset: u8) -> u16 {
+    base.wrapping_add(offset) as u16
+}
+
+fn read_zero_page_word(memory: &C64Memory, address: u8) -> u16 {
+    let low = memory.read_byte(address as u16) as u16;
+    let high = memory.read_byte(address.wrapping_add(1) as u16) as u16;
+    high << 8 | low
+}
+
 fn get_read_address(memory: &C64Memory, proc: &Mos6510) -> u16 {
     match proc.addressing_mode {
         AddressingMode::Implied     => std::panic::panic_any(format!("Implied does not read bytes!! {:#04x}", proc.program_counter)),
@@ -53,10 +63,10 @@ fn get_read_address(memory: &C64Memory, proc: &Mos6510) -> u16 {
         AddressingMode::XAbsolute   => memory.read_word(proc.program_counter + 1) + proc.x_index as u16,
         AddressingMode::YAbsolute   => memory.read_word(proc.program_counter + 1) + proc.y_index as u16,
         AddressingMode::ZeroPage    => memory.read_byte(proc.program_counter + 1) as u16,
-        AddressingMode::XZeroPage   => memory.read_byte(proc.program_counter + 1) as u16 + proc.x_index as u16,
-        AddressingMode::YZeroPage   => memory.read_byte(proc.program_counter + 1) as u16 + proc.y_index as u16,
-        AddressingMode::XIndirect   => memory.read_word(memory.read_byte(proc.program_counter + 1) as u16 + proc.x_index as u16), //not sure about these
-        AddressingMode::YIndirect   => memory.read_word(memory.read_byte(proc.program_counter + 1) as u16) + proc.y_index as u16,
+        AddressingMode::XZeroPage   => zero_page_add(memory.read_byte(proc.program_counter + 1), proc.x_index),
+        AddressingMode::YZeroPage   => zero_page_add(memory.read_byte(proc.program_counter + 1), proc.y_index),
+        AddressingMode::XIndirect   => read_zero_page_word(memory, memory.read_byte(proc.program_counter + 1).wrapping_add(proc.x_index)),
+        AddressingMode::YIndirect   => read_zero_page_word(memory, memory.read_byte(proc.program_counter + 1)) + proc.y_index as u16,
         AddressingMode::Indirect    => memory.read_word(memory.read_word(proc.program_counter + 1))
     }
 }
@@ -763,3 +773,4 @@ fn get_cpu() -> Mos6510 {
 #[cfg(test)] mod test_asl;
 #[cfg(test)] mod test_rol;
 #[cfg(test)] mod test_lda;
+#[cfg(test)] mod test_addressing;
