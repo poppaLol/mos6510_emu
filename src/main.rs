@@ -5,10 +5,12 @@ extern crate byte;
 mod flags;
 mod memory;
 mod proc;
+mod screen;
 mod vic;
 use flags::{ Flags, AddressingMode, get_mode};
 use proc::{Mos6510, ProcDelta};
 use memory::C64Memory;
+use screen::render_text_screen;
 use std::num::Wrapping;
 use std::collections::VecDeque;
 use std::env;
@@ -23,6 +25,7 @@ const DEFAULT_TRACE_TAIL: usize = 20;
 struct BootOptions {
     max_instructions: Option<usize>,
     trace_tail: usize,
+    screen: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -63,10 +66,14 @@ impl TraceEntry {
 fn parse_boot_options() -> BootOptions {
     let mut max_instructions = None;
     let mut trace_tail = DEFAULT_TRACE_TAIL;
+    let mut screen = false;
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--screen" => {
+                screen = true;
+            },
             "--max-instructions" => {
                 let value = args.next().unwrap_or_else(|| {
                     panic!("--max-instructions requires a value");
@@ -87,7 +94,14 @@ fn parse_boot_options() -> BootOptions {
         }
     }
 
-    BootOptions { max_instructions, trace_tail }
+    BootOptions { max_instructions, trace_tail, screen }
+}
+
+fn print_screen_snapshot(memory: &C64Memory, options: &BootOptions) {
+    if options.screen {
+        println!("C64 text screen:");
+        println!("{}", render_text_screen(memory));
+    }
 }
 
 fn remember_trace(trace: &mut VecDeque<TraceEntry>, entry: TraceEntry, max_len: usize) {
@@ -253,6 +267,29 @@ fn eor(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
     (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+}
+
+fn bit(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+    let read_address = get_read_address(&memory, &proc);
+    let value = memory.read_byte(read_address);
+
+    proc.program_counter += proc.addressing_mode.bytes_increment();
+    proc.cycles_count += proc.addressing_mode.cycles_increment(0);
+
+    match proc.accumulator & value == 0 {
+        true => proc.processor_status |= Flags::Z_FLAG,
+        false => proc.processor_status &= !Flags::Z_FLAG
+    };
+    match value & Flags::N_FLAG.bits() > 0 {
+        true => proc.processor_status |= Flags::N_FLAG,
+        false => proc.processor_status &= !Flags::N_FLAG
+    };
+    match value & Flags::V_FLAG.bits() > 0 {
+        true => proc.processor_status |= Flags::V_FLAG,
+        false => proc.processor_status &= !Flags::V_FLAG
+    };
+
+    (memory, proc)
 }
 
 fn adc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -769,6 +806,7 @@ fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memo
         0x29 | 0x2D | 0x3D | 0x39 | 0x25 | 0x35 | 0x21 | 0x31 => and(memory, proc),
         0x0B | 0x2B => anc(memory, proc),
         0x49 | 0x45 | 0x55 | 0x41 | 0x51 | 0x4D | 0x5D | 0x59 => eor(memory, proc),
+        0x24 | 0x2C => bit(memory, proc),
         0x69 | 0x65 | 0x75 | 0x61 | 0x71 | 0x6D | 0x7D | 0x79 => adc(memory, proc),
         0xE9 | 0xE5 | 0xF5 | 0xE1 | 0xF1 | 0xED | 0xFD | 0xF9 => sbc(memory, proc),
         0xC9 | 0xC5 | 0xD5 | 0xC1 | 0xD1 | 0xCD | 0xDD | 0xD9 => cmp(memory, proc),
@@ -871,6 +909,7 @@ async fn main() {
                     proc.cycles_count
                 );
                 print_trace_tail(&trace);
+                print_screen_snapshot(&memory, &options);
                 break;
             }
         }
@@ -897,6 +936,7 @@ async fn main() {
                     panic_summary(error)
                 );
                 print_trace_tail(&trace);
+                print_screen_snapshot(&memory, &options);
                 break;
             }
         }
@@ -947,3 +987,4 @@ fn get_cpu() -> Mos6510 {
 #[cfg(test)] mod test_lda;
 #[cfg(test)] mod test_addressing;
 #[cfg(test)] mod test_stack;
+#[cfg(test)] mod test_bit;
