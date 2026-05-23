@@ -1,13 +1,13 @@
 bitflags! {
   pub struct Flags: u8 {
-    const N_FLAG = 0x1; //Negative
-    const V_FLAG = 0x2; //oVerflow
-    const ALWAYS = 0x4; //always on apparently
-    const B_FLAG = 0x8; //Break (1 when interupt was caused by a BRK)
-    const D_FLAG = 0x10; //Decimal (1 when CPU in BCD mode)
-    const I_FLAG = 0x20; //IRQ (when 1, no interupts will occur (exceptions are IRQs forced by BRK and NMIs))
-    const Z_FLAG = 0x40; //Zero (1 when all bits of a result are 0)
-    const C_FLAG = 0x80; //Carry (1 on unsigned overflow)
+    const C_FLAG = 0x01; //Carry (1 on unsigned overflow)
+    const Z_FLAG = 0x02; //Zero (1 when all bits of a result are 0)
+    const I_FLAG = 0x04; //IRQ (when 1, no interupts will occur (exceptions are IRQs forced by BRK and NMIs))
+    const D_FLAG = 0x08; //Decimal (1 when CPU in BCD mode)
+    const B_FLAG = 0x10; //Break (1 when interupt was caused by a BRK)
+    const ALWAYS = 0x20; //Unused status bit, conventionally pushed/read as 1
+    const V_FLAG = 0x40; //oVerflow
+    const N_FLAG = 0x80; //Negative
   }
 }
 

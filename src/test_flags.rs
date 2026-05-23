@@ -1,4 +1,16 @@
-use super::{AddressingMode, get_mode};
+use super::{AddressingMode, Flags, get_mode};
+
+#[test]
+fn status_flags_use_6502_bit_layout() {
+  assert_eq!(Flags::C_FLAG.bits(), 0x01);
+  assert_eq!(Flags::Z_FLAG.bits(), 0x02);
+  assert_eq!(Flags::I_FLAG.bits(), 0x04);
+  assert_eq!(Flags::D_FLAG.bits(), 0x08);
+  assert_eq!(Flags::B_FLAG.bits(), 0x10);
+  assert_eq!(Flags::ALWAYS.bits(), 0x20);
+  assert_eq!(Flags::V_FLAG.bits(), 0x40);
+  assert_eq!(Flags::N_FLAG.bits(), 0x80);
+}
 
 #[test]
 fn all_are_implied() {
