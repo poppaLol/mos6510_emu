@@ -54,6 +54,13 @@ fn read_zero_page_word(memory: &C64Memory, address: u8) -> u16 {
     high << 8 | low
 }
 
+fn read_jmp_indirect_word(memory: &C64Memory, address: u16) -> u16 {
+    let low = memory.read_byte(address) as u16;
+    let high_address = (address & 0xFF00) | (address.wrapping_add(1) & 0x00FF);
+    let high = memory.read_byte(high_address) as u16;
+    high << 8 | low
+}
+
 fn get_read_address(memory: &C64Memory, proc: &Mos6510) -> u16 {
     match proc.addressing_mode {
         AddressingMode::Implied     => std::panic::panic_any(format!("Implied does not read bytes!! {:#04x}", proc.program_counter)),
@@ -67,7 +74,7 @@ fn get_read_address(memory: &C64Memory, proc: &Mos6510) -> u16 {
         AddressingMode::YZeroPage   => zero_page_add(memory.read_byte(proc.program_counter + 1), proc.y_index),
         AddressingMode::XIndirect   => read_zero_page_word(memory, memory.read_byte(proc.program_counter + 1).wrapping_add(proc.x_index)),
         AddressingMode::YIndirect   => read_zero_page_word(memory, memory.read_byte(proc.program_counter + 1)) + proc.y_index as u16,
-        AddressingMode::Indirect    => memory.read_word(memory.read_word(proc.program_counter + 1))
+        AddressingMode::Indirect    => read_jmp_indirect_word(memory, memory.read_word(proc.program_counter + 1))
     }
 }
 

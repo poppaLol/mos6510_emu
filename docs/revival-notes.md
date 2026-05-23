@@ -94,11 +94,16 @@ Page-crossing detection now uses 6502-sized pages:
 - `0x0FFE -> 0x0FFF` does not count as a crossing.
 - Zero-page indexed modes do not add page-crossing cycle penalties.
 
+Absolute-indirect `JMP (addr)` now reproduces the original 6502 page-boundary quirk:
+
+- A pointer at `$1234` reads low byte from `$1234` and high byte from `$1235`.
+- A pointer at `$12FF` reads low byte from `$12FF` and high byte from `$1200`, not `$1300`.
+
 The suite was green after these changes:
 
 ```text
 cargo test
-248 passed; 0 failed
+250 passed; 0 failed
 ```
 
 ## Known Technical Risks
@@ -107,9 +112,7 @@ These are the main correctness risks identified while reading the code.
 
 ### Indirect Addressing Details
 
-`XIndirect` and `YIndirect` now use wrapped zero-page pointer reads, but the broader indirect-addressing behavior still deserves a careful audit against a 6502 reference.
-
-`JMP (addr)` on the original 6502 has the famous page-boundary indirect bug. A C64-compatible emulator may need to reproduce it.
+`XIndirect`, `YIndirect`, and absolute-indirect `JMP` now cover the major wrapping behaviors, but the broader indirect-addressing behavior still deserves a careful audit against a 6502 reference.
 
 ### Instruction Timing
 
@@ -138,15 +141,15 @@ The memory map currently treats much of the I/O space as RAM or ROM and simply r
 
 The next phase should make the CPU and memory foundations trustworthy before chasing full C64 behavior.
 
-1. Audit `XIndirect`, `YIndirect`, and `Indirect` addressing against 6502 behavior.
-2. Split `main.rs` into smaller modules:
+1. Add a structured trace/checkpoint harness for the KERNAL boot path.
+2. Audit remaining addressing and instruction timing against a 6502 reference.
+3. Split `main.rs` into smaller modules:
    - `cpu.rs`
    - `addressing.rs`
    - `instructions.rs`
    - `machine.rs`
    - a small `main.rs` runner
-3. Replace direct `print!` calls in memory and execution with a structured trace mode.
-4. Add a trace format that prints registers, status, PC, opcode, effective address, and cycle count.
+4. Replace direct `print!` calls in memory and execution with a structured trace mode.
 5. Compare traces against known-good 6502/6510 references or test ROMs.
 6. Add minimal C64 device behavior only after CPU/memory behavior is less ambiguous.
 
