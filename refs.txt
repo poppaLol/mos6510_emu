@@ -1,0 +1,20 @@
+https://github.com/GunshipPenguin/lib8080
+https://www.c64-wiki.com/wiki/MOS_Technology_6510
+https://fynydd.com/blog/crash-course-on-emulating-the-mos-6510-cpu/
+http://archive.6502.org/datasheets/mos_6510_mpu.pdf
+http://www.oxyron.de/html/opcodes02.html
+http://fms.komkon.org/EMUL8/HOWTO.html
+
+Implied addressing, which is rather a "no addressing mode at all"-option: Instructions which do not address an arbitrary memory location only supports this mode.
+Accumulator addressing, supported by bit-shifting instructions, turns the "action" of the operation towards the accumulator.
+Immediate addressing, which refers to the byte immediately following the opcode for the instruction.
+Absolute addressing, which refers to a given 16-bit address
+Indexed absolute addressing, indexed by either the X and Y index registers: These adds the index register to a base address, forming the final "destination" for the operation.
+Zeropage addressing, which is similar to absolute addressing, but only works on addresses within the zeropage.
+Indexed zeropage addressing: Effective address is zero page address plus the contents of the given register (X, or Y).
+Relative addressing, which uses a single byte to specify the destination of conditional branches ("jumps") within 128 bytes of where the branching instruction resides.
+Absolute-indirect addressing, which takes the content of a vector as its destination address.
+Indexed-indirect addressing, which uses the X index register to select one of a range of vectors in zeropage and takes the address from that pointer. Extremely rarely used!
+Indirect-indexed addressing, which adds the Y index register to the contents of a pointer to obtain the address. Very flexible instruction found in anything but the most trivial machine language routines!
+
+http://www.zimmers.net/anonftp/pub/cbm/maps/C64.MemoryMap
