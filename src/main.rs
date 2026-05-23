@@ -5,6 +5,7 @@ extern crate byte;
 mod flags;
 mod memory;
 mod proc;
+mod vic;
 use flags::{ Flags, AddressingMode, get_mode};
 use proc::{Mos6510, ProcDelta};
 use memory::C64Memory;
@@ -29,6 +30,8 @@ struct TraceEntry {
     index: usize,
     pc: u16,
     op_code: u8,
+    c1_pointer: u16,
+    c1_effective_address: u16,
     accumulator: u8,
     x_index: u8,
     y_index: u8,
@@ -38,11 +41,15 @@ struct TraceEntry {
 }
 
 impl TraceEntry {
-    fn from_cpu(index: usize, op_code: u8, proc: &Mos6510) -> TraceEntry {
+    fn from_cpu(index: usize, op_code: u8, memory: &C64Memory, proc: &Mos6510) -> TraceEntry {
+        let c1_pointer = (memory.ram[0xC2] as u16) << 8 | memory.ram[0xC1] as u16;
+
         TraceEntry {
             index,
             pc: proc.program_counter,
             op_code,
+            c1_pointer,
+            c1_effective_address: (Wrapping(c1_pointer) + Wrapping(proc.y_index as u16)).0,
             accumulator: proc.accumulator,
             x_index: proc.x_index,
             y_index: proc.y_index,
@@ -101,10 +108,12 @@ fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
     println!("Recent instruction trace:");
     for entry in trace {
         println!(
-            "#{:<6} PC={:#06x} OP={:#04x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} SR={:#04x} CC={}",
+            "#{:<6} PC={:#06x} OP={:#04x} PTR_C1={:#06x} EFF_C1Y={:#06x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} SR={:#04x} CC={}",
             entry.index,
             entry.pc,
             entry.op_code,
+            entry.c1_pointer,
+            entry.c1_effective_address,
             entry.accumulator,
             entry.x_index,
             entry.y_index,
@@ -873,7 +882,7 @@ async fn main() {
         }
 
         let op_code = memory.read_byte(proc.program_counter);
-        remember_trace(&mut trace, TraceEntry::from_cpu(i, op_code, &proc), options.trace_tail);
+        remember_trace(&mut trace, TraceEntry::from_cpu(i, op_code, &memory, &proc), options.trace_tail);
         let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(memory, proc, op_code)));
         match execution {
             Ok(res) => {

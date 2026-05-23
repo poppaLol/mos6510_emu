@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Read;
+use crate::vic::VicII;
 
 const BASIC_ROM_OFFSET: u16 = 0xA000;
 const CHAR_ROM_OFFSET: u16 = 0xD000;
@@ -11,6 +12,7 @@ pub struct C64Memory {
     pub basic_rom: [u8; 0x2000],
     pub char_rom: [u8; 0x1000],
     pub kernel_rom: [u8; 0x2000],
+    pub vic: VicII,
     pub trace: bool
 }
 
@@ -39,6 +41,7 @@ impl C64Memory {
         basic_rom: b_rombuffer,
         char_rom: charbuffer,
         kernel_rom: k_rombuffer,
+        vic: VicII::new(),
         trace: true
     }
   }
@@ -50,6 +53,7 @@ impl C64Memory {
           basic_rom: [0; 0x2000],
           char_rom: [0; 0x1000],
           kernel_rom: [0; 0x2000],
+          vic: VicII::new(),
           trace: false
       }
   }
@@ -94,6 +98,18 @@ impl C64Memory {
     (self.read_kern_rom_byte(address + 1) as u16) << 8 | 
       self.read_kern_rom_byte(address) as u16
   }
+
+  fn read_io_byte(&self, address: u16) -> u8 {
+    match address {
+      0xD000..=0xD3FF => self.vic.read_byte(address),
+      _ => self.read_ram_byte(address)
+    }
+  }
+
+  fn read_io_word(&self, address: u16) -> u16 {
+    (self.read_io_byte(address + 1) as u16) << 8 |
+      self.read_io_byte(address) as u16
+  }
   
   pub fn read_word(&self, address: u16) -> u16 {
     let latch_bits = self.ram[1];
@@ -107,10 +123,10 @@ impl C64Memory {
         } else { 
           self.read_ram_word(address) 
         },
-      0xD000..=0xDFFF => if latch_bits > 1 && latch_bits & 0b100 > 0 { 
-          self.read_char_rom_word(address - CHAR_ROM_OFFSET) 
-        } else { 
-          self.read_ram_word(address)
+      0xD000..=0xDFFF => if latch_bits & 0b100 > 0 {
+          self.read_io_word(address)
+        } else {
+          self.read_char_rom_word(address - CHAR_ROM_OFFSET)
         }, //or cart_hi todo
       0xE000..=0xFFFF => if latch_bits & 0b10 > 0 { 
         self.read_kern_rom_word(address - KERN_ROM_OFFSET)
@@ -132,10 +148,10 @@ impl C64Memory {
         } else { 
           self.read_ram_byte(address) 
         },
-      0xD000..=0xDFFF => if latch_bits > 1 && latch_bits & 0b100 > 0 { 
-        self.read_char_rom_byte(address - CHAR_ROM_OFFSET) 
+      0xD000..=0xDFFF => if latch_bits & 0b100 > 0 {
+        self.read_io_byte(address)
         } else { 
-          self.read_ram_byte(address)
+          self.read_char_rom_byte(address - CHAR_ROM_OFFSET)
         }, //or cart_hi todo
       0xE000..=0xFFFF => if latch_bits & 0b10 > 0 { 
         self.read_kern_rom_byte(address - KERN_ROM_OFFSET)
@@ -147,7 +163,10 @@ impl C64Memory {
 
   pub fn write_byte(&mut self, pointer: &usize, value: u8) {
     if self.trace { print!(" ------  write ({:#02x}) at: {:#04x}", value, pointer); }
-    self.ram[*pointer] = value;
+    match *pointer {
+      0xD000..=0xD3FF => self.vic.write_byte(*pointer as u16, value),
+      _ => self.ram[*pointer] = value
+    }
   }
 
   
@@ -208,7 +227,7 @@ mod tests {
   #[test]
   fn rom_reads_map_first_and_last_bytes() {
     let mut mem = C64Memory::get_empty_mem();
-    mem.ram[1] = 0x37;
+    mem.ram[1] = 0x33;
     mem.basic_rom[0] = 0xA0;
     mem.basic_rom[0x1FFF] = 0xBF;
     mem.char_rom[0] = 0xD0;
@@ -222,6 +241,15 @@ mod tests {
     assert_eq!(mem.read_byte(0xDFFF), 0xDF);
     assert_eq!(mem.read_byte(0xE000), 0xE0);
     assert_eq!(mem.read_byte(0xFFFF), 0xFF);
+  }
+
+  #[test]
+  fn io_reads_expose_fake_vic_raster_when_charen_set() {
+    let mut mem = C64Memory::get_empty_mem();
+    mem.ram[1] = 0x37;
+    mem.vic.write_byte(0xD012, 0x66);
+
+    assert_eq!(mem.read_byte(0xD012), 0x00);
   }
 
   #[test]

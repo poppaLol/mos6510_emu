@@ -114,7 +114,7 @@ The executable now has a bounded checkpoint mode for making KERNAL startup progr
 cargo run -- --max-instructions 29060 --trace-tail 24
 ```
 
-In bounded mode, legacy per-read/write tracing is disabled and the runner prints a compact tail of recent CPU state when it reaches the instruction limit or hits an emulator panic. The default interactive mode remains available when no limit is passed.
+In bounded mode, legacy per-read/write tracing is disabled and the runner prints a compact tail of recent CPU state when it reaches the instruction limit or hits an emulator panic. The trace includes the zero-page pointer at `$C1/$C2` and the effective `($C1),Y` address because the KERNAL RAM test uses that pair to walk memory. The default interactive mode remains available when no limit is passed.
 
 The trace around `0xFD6E..0xFD84` currently looks like the KERNAL RAM test loop rather than a hard lock:
 
@@ -135,7 +135,18 @@ FD83: INY
 FD84: BNE ...
 ```
 
-The important sign of progress is that `Y` advances through the loop. Around the observed checkpoint, the runner shows `Y` moving from `0xB9` to `0xBA`, while the program counter cycles through the same RAM-test routine. The next useful harness improvement is a target-PC or target-range stop so the boot path can be followed from milestone to milestone without guessing instruction counts.
+The important sign of progress is that `Y` advances through the loop and `PTR_C1` advances after `Y` wraps. Around the first observed checkpoint, the runner showed `Y` moving from `0xB9` to `0xBA`, while the program counter cycled through the same RAM-test routine. The next useful harness improvement is a target-PC or target-range stop so the boot path can be followed from milestone to milestone without guessing instruction counts.
+
+At a later checkpoint, the RAM test reached `PTR_C1=0xA000` and moved on to a raster wait:
+
+```text
+FF5E: LDA $D012
+FF61: BNE $FF5E
+```
+
+`$D012` is the VIC-II raster counter low byte. The emulator now has a first VIC-II stub so memory-mapped I/O reads at `$D000..$D3FF` can be handled by a device object. For now, `$D012` deliberately reports `0`, which is enough to let the KERNAL raster wait proceed without attempting real video timing yet.
+
+With the fake raster count in place, the boot path gets past the wait and reaches BASIC ROM around `0xA421`. The next observed stop is a Rust overflow in `PLA` stack-pointer increment when the emulated stack pointer is `0xFF`; this likely needs 6502-style wrapping stack behavior rather than checked `u8` addition.
 
 ## Known Technical Risks
 
