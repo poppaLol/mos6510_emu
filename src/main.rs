@@ -587,7 +587,7 @@ fn pla(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     proc.accumulator = stack_read_byte(memory, proc);
-    let delta = ProcDelta::empty().with_stack_pointer(proc.stack_pointer + 1);
+    let delta = ProcDelta::empty().with_stack_pointer(proc.stack_pointer.wrapping_add(1));
     proc = delta.apply_proc_delta(proc);
     (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
 }
@@ -604,7 +604,7 @@ fn plp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     proc.processor_status = Flags::from_bits(stack_read_byte(memory, proc)).unwrap_or(Flags::ALWAYS);
-    proc = ProcDelta::empty().with_stack_pointer(proc.stack_pointer + 1).apply_proc_delta(proc);
+    proc = ProcDelta::empty().with_stack_pointer(proc.stack_pointer.wrapping_add(1)).apply_proc_delta(proc);
     (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
 }
 
@@ -729,14 +729,14 @@ fn jsr(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
 
 fn stack_push_word(mut memory: C64Memory, mut proc: Mos6510, val: u16) -> (C64Memory, Mos6510) {
     memory.stack_push_word(proc.stack_pointer as usize, val);
-    proc.stack_pointer -= 2;
+    proc.stack_pointer = proc.stack_pointer.wrapping_sub(2);
     (memory, proc)
 }
 
 
 fn stack_push_byte(mut memory: C64Memory, mut proc: Mos6510, val: u8) -> (C64Memory, Mos6510) {
     memory.stack_push_byte(proc.stack_pointer as usize, val);
-    proc.stack_pointer -= 1;
+    proc.stack_pointer = proc.stack_pointer.wrapping_sub(1);
     (memory, proc)
 }
 
@@ -752,7 +752,7 @@ fn stack_read_byte(mut memory: C64Memory, proc: Mos6510) -> u8 {
 fn rts(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
     let target_address = stack_read_word(memory, proc);
     let delta = ProcDelta::empty()
-        .with_stack_pointer(proc.stack_pointer + 2)
+        .with_stack_pointer(proc.stack_pointer.wrapping_add(2))
         .with_program_counter(target_address);
     (memory, delta.apply_proc_delta(proc))
 }
@@ -946,3 +946,4 @@ fn get_cpu() -> Mos6510 {
 #[cfg(test)] mod test_rol;
 #[cfg(test)] mod test_lda;
 #[cfg(test)] mod test_addressing;
+#[cfg(test)] mod test_stack;

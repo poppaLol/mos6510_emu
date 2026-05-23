@@ -146,7 +146,9 @@ FF61: BNE $FF5E
 
 `$D012` is the VIC-II raster counter low byte. The emulator now has a first VIC-II stub so memory-mapped I/O reads at `$D000..$D3FF` can be handled by a device object. For now, `$D012` deliberately reports `0`, which is enough to let the KERNAL raster wait proceed without attempting real video timing yet.
 
-With the fake raster count in place, the boot path gets past the wait and reaches BASIC ROM around `0xA421`. The next observed stop is a Rust overflow in `PLA` stack-pointer increment when the emulated stack pointer is `0xFF`; this likely needs 6502-style wrapping stack behavior rather than checked `u8` addition.
+With the fake raster count in place, the boot path gets past the wait and reaches BASIC ROM around `0xA421`. The next observed stop was a Rust overflow in `PLA` stack-pointer increment when the emulated stack pointer was `0xFF`.
+
+Stack pointer movement now uses 6502-style wrapping behavior, and stack reads/writes wrap within page `$0100..$01FF`. After that fix, the boot path gets past the `PLA` case and reaches an unimplemented `BIT` zero-page instruction (`0x24`) at `0xED12`.
 
 ## Known Technical Risks
 

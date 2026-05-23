@@ -174,7 +174,8 @@ impl C64Memory {
     //stack is 0x100 to 0x1FF - and pointer is u8 so have to add 0x100 to it
     let offset_ptr = ptr + 0x100;
     self.write_byte(&offset_ptr, (val >> 8) as u8);
-    self.write_byte(&(offset_ptr - 1), val as u8);
+    let low_ptr = 0x100 + (ptr as u8).wrapping_sub(1) as usize;
+    self.write_byte(&low_ptr, val as u8);
   }
 
 
@@ -186,15 +187,16 @@ impl C64Memory {
 
 
   pub fn stack_pop_word(&mut self, ptr: u16) -> u16 {
-    let offset_ptr = ptr + 1 + 0x100;
-    let result = self.read_word(offset_ptr);
-    self.write_byte(&(offset_ptr as usize), 0u8);
-    self.write_byte(&((offset_ptr + 1) as usize), 0u8);
+    let low_ptr = 0x100 + (ptr as u8).wrapping_add(1) as u16;
+    let high_ptr = 0x100 + (ptr as u8).wrapping_add(2) as u16;
+    let result = (self.read_byte(high_ptr) as u16) << 8 | self.read_byte(low_ptr) as u16;
+    self.write_byte(&(low_ptr as usize), 0u8);
+    self.write_byte(&(high_ptr as usize), 0u8);
     result
   }
 
   pub fn stack_pop_byte(&mut self, ptr: u16) -> u8 {
-    let offset_ptr = ptr + 1 + 0x100;
+    let offset_ptr = 0x100 + (ptr as u8).wrapping_add(1) as u16;
     let result = self.read_byte(offset_ptr);
     self.write_byte(&(offset_ptr as usize), 0u8);
     result
