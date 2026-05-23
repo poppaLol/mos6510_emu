@@ -56,7 +56,7 @@ fn get_read_address(memory: &C64Memory, proc: &Mos6510) -> u16 {
         AddressingMode::XZeroPage   => memory.read_byte(proc.program_counter + 1) as u16 + proc.x_index as u16,
         AddressingMode::YZeroPage   => memory.read_byte(proc.program_counter + 1) as u16 + proc.y_index as u16,
         AddressingMode::XIndirect   => memory.read_word(memory.read_byte(proc.program_counter + 1) as u16 + proc.x_index as u16), //not sure about these
-        AddressingMode::YIndirect   => memory.read_word(memory.read_word(proc.program_counter + 1)) + proc.y_index as u16,
+        AddressingMode::YIndirect   => memory.read_word(memory.read_byte(proc.program_counter + 1) as u16) + proc.y_index as u16,
         AddressingMode::Indirect    => memory.read_word(memory.read_word(proc.program_counter + 1))
     }
 }
