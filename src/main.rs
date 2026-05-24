@@ -21,11 +21,25 @@ use tokio::time;
 
 const UPPER_BIT_POS: u8 = 0b10000000;
 const LOWER_BIT_POS: u8 = 0b00000001;
-const DEFAULT_TRACE_TAIL: usize = 20;
+const NMI_VECTOR: u16 = 0xFFFA;
+const RESET_VECTOR: u16 = 0xFFFC;
+const IRQ_BRK_VECTOR: u16 = 0xFFFE;
+const KEYBOARD_BUFFER_COUNT: usize = 0x00C6;
+const KEYBOARD_BUFFER_START: usize = 0x0277;
+const KEYBOARD_WAIT_START: u16 = 0xE5CD;
+const KEYBOARD_WAIT_END: u16 = 0xE5D4;
+
+#[allow(dead_code)]
+enum Interrupt {
+    Irq,
+    Nmi,
+}
 
 struct BootOptions {
     max_instructions: Option<usize>,
     trace_tail: usize,
+    trace_memory: bool,
+    verbose: bool,
     screen: bool,
     stop_on_brk: bool,
     stop_outside_rom: bool,
@@ -35,6 +49,7 @@ struct BootOptions {
     watch_stack_value: Option<u16>,
     dump_zero_page: bool,
     dump_screen_ram: bool,
+    typed_input: VecDeque<u8>,
 }
 
 #[derive(Copy, Clone)]
@@ -94,9 +109,37 @@ fn parse_u16_arg(value: &str, name: &str) -> u16 {
     }
 }
 
+fn parse_typed_input(value: &str) -> VecDeque<u8> {
+    let mut chars = value.chars();
+    let mut bytes = VecDeque::new();
+
+    while let Some(ch) = chars.next() {
+        let value = if ch == '\\' {
+            match chars.next() {
+                Some('n') | Some('r') => 0x0D,
+                Some('t') => b'\t',
+                Some('\\') => b'\\',
+                Some('"') => b'"',
+                Some(other) => other as u8,
+                None => b'\\',
+            }
+        } else if ch == '\n' || ch == '\r' {
+            0x0D
+        } else {
+            ch.to_ascii_uppercase() as u8
+        };
+
+        bytes.push_back(value);
+    }
+
+    bytes
+}
+
 fn parse_boot_options() -> BootOptions {
     let mut max_instructions = None;
-    let mut trace_tail = DEFAULT_TRACE_TAIL;
+    let mut trace_tail = 0;
+    let mut trace_memory = false;
+    let mut verbose = false;
     let mut screen = false;
     let mut stop_on_brk = false;
     let mut stop_outside_rom = false;
@@ -106,6 +149,7 @@ fn parse_boot_options() -> BootOptions {
     let mut watch_stack_value = None;
     let mut dump_zero_page = false;
     let mut dump_screen_ram = false;
+    let mut typed_input = VecDeque::new();
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
@@ -134,6 +178,12 @@ fn parse_boot_options() -> BootOptions {
                 trace_tail = value.parse::<usize>().unwrap_or_else(|_| {
                     panic!("invalid --trace-tail value: {}", value);
                 });
+            },
+            "--trace-memory" => {
+                trace_memory = true;
+            },
+            "--verbose" => {
+                verbose = true;
             },
             "--stop-pc" => {
                 let value = args.next().unwrap_or_else(|| {
@@ -171,6 +221,12 @@ fn parse_boot_options() -> BootOptions {
             "--dump-screen-ram" => {
                 dump_screen_ram = true;
             },
+            "--type" => {
+                let value = args.next().unwrap_or_else(|| {
+                    panic!("--type requires a value");
+                });
+                typed_input.extend(parse_typed_input(&value));
+            },
             _ => panic!("unknown argument: {}", arg),
         }
     }
@@ -178,6 +234,8 @@ fn parse_boot_options() -> BootOptions {
     BootOptions {
         max_instructions,
         trace_tail,
+        trace_memory,
+        verbose,
         screen,
         stop_on_brk,
         stop_outside_rom,
@@ -187,6 +245,7 @@ fn parse_boot_options() -> BootOptions {
         watch_stack_value,
         dump_zero_page,
         dump_screen_ram,
+        typed_input,
     }
 }
 
@@ -266,6 +325,11 @@ fn remember_trace(trace: &mut VecDeque<TraceEntry>, entry: TraceEntry, max_len: 
     trace.push_back(entry);
 }
 
+fn trace_enabled(options: &BootOptions) -> bool {
+    options.trace_tail > 0
+        || options.watch_stack_word.is_some()
+}
+
 fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
     if trace.is_empty() {
         return;
@@ -307,6 +371,24 @@ fn read_raw_word(memory: &C64Memory, address: u16) -> u16 {
     let high_address = address.wrapping_add(1) as usize;
 
     (memory.ram[high_address] as u16) << 8 | memory.ram[low_address] as u16
+}
+
+fn feed_typed_input(memory: &mut C64Memory, proc: &Mos6510, typed_input: &mut VecDeque<u8>) -> bool {
+    if typed_input.is_empty()
+        || memory.ram[KEYBOARD_BUFFER_COUNT] != 0
+        || proc.program_counter < KEYBOARD_WAIT_START
+        || proc.program_counter > KEYBOARD_WAIT_END
+    {
+        return false;
+    }
+
+    if let Some(ch) = typed_input.pop_front() {
+        memory.ram[KEYBOARD_BUFFER_START] = ch;
+        memory.ram[KEYBOARD_BUFFER_COUNT] = 1;
+        true
+    } else {
+        false
+    }
 }
 
 fn panic_summary(error: Box<dyn std::any::Any + Send>) -> String {
@@ -400,13 +482,8 @@ fn nop(mut proc: Mos6510) -> Mos6510 {
 }
 
 fn brk(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
-    proc.processor_status = proc.processor_status | Flags::B_FLAG | Flags::I_FLAG;
-    
     proc.program_counter += 2;
-    proc.cycles_count += 7;
-
-    let with_stored_pc = stack_push_word(memory, proc, proc.program_counter);
-    stack_push_byte(with_stored_pc.0, with_stored_pc.1, proc.processor_status.bits())
+    interrupt(memory, proc, Interrupt::Irq, true)
 }
 
 fn ora(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -484,14 +561,14 @@ fn adc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    let extra_add = if proc.processor_status.contains(Flags::C_FLAG) {1} else {0};
+    let extra_add = if proc.processor_status.contains(Flags::C_FLAG) {1u16} else {0u16};
 
-    let sum = Wrapping(proc.accumulator) + Wrapping(right_operand + extra_add);
-    let carry = proc.accumulator.checked_add(right_operand + extra_add);
-    proc.accumulator = sum.0;
+    let sum = proc.accumulator as u16 + right_operand as u16 + extra_add;
+    let carry = if sum > 0xFF { None } else { Some(sum as u8) };
+    proc.accumulator = sum as u8;
     (memory, set_proc_status(
         Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG | Flags::V_FLAG,
-        proc.accumulator, carry, (orig_val,sum.0), proc))
+        proc.accumulator, carry, (orig_val, proc.accumulator), proc))
 }
 
 fn sbc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -504,17 +581,19 @@ fn sbc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    let extra_sub = if proc.processor_status.contains(Flags::C_FLAG) {0} else {1};
+    let extra_sub = if proc.processor_status.contains(Flags::C_FLAG) {0u16} else {1u16};
 
-    let sum = Wrapping(proc.accumulator) - Wrapping(right_operand + extra_sub);
-    let carry = match proc.accumulator.checked_sub(right_operand + extra_sub) {
-        None => Some(sum.0),
-        _ => None
+    let subtrahend = right_operand as u16 + extra_sub;
+    let sum = (proc.accumulator as u16).wrapping_sub(subtrahend);
+    let carry = if proc.accumulator as u16 >= subtrahend {
+        None
+    } else {
+        Some(sum as u8)
     };
-    proc.accumulator = sum.0;
+    proc.accumulator = sum as u8;
     (memory, set_proc_status(
         Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG | Flags::V_FLAG,
-        proc.accumulator, carry, (orig_val,sum.0), proc))
+        proc.accumulator, carry, (orig_val, proc.accumulator), proc))
 }
 
 fn cmp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -959,6 +1038,43 @@ fn stack_read_byte(mut memory: C64Memory, proc: Mos6510) -> u8 {
     memory.stack_pop_byte(proc.stack_pointer as u16)
 }
 
+fn interrupt(memory: C64Memory, mut proc: Mos6510, interrupt: Interrupt, break_flag: bool) -> (C64Memory, Mos6510) {
+    let vector = match interrupt {
+        Interrupt::Nmi => NMI_VECTOR,
+        Interrupt::Irq => IRQ_BRK_VECTOR,
+    };
+    let return_address = proc.program_counter;
+    let mut stored_status = proc.processor_status | Flags::ALWAYS;
+    if break_flag {
+        stored_status |= Flags::B_FLAG;
+    } else {
+        stored_status &= !Flags::B_FLAG;
+    }
+
+    proc.processor_status = proc.processor_status | Flags::ALWAYS | Flags::I_FLAG;
+    if break_flag {
+        proc.processor_status |= Flags::B_FLAG;
+    } else {
+        proc.processor_status &= !Flags::B_FLAG;
+    }
+    proc.program_counter = memory.read_word(vector);
+    proc.cycles_count += 7;
+
+    let with_stored_pc = stack_push_word(memory, proc, return_address);
+    stack_push_byte(with_stored_pc.0, with_stored_pc.1, stored_status.bits())
+}
+
+fn service_pending_interrupt(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510, bool) {
+    let mut memory = memory;
+    if memory.irq_pending() && !proc.processor_status.contains(Flags::I_FLAG) {
+        memory.acknowledge_irq();
+        let res = interrupt(memory, proc, Interrupt::Irq, false);
+        (res.0, res.1, true)
+    } else {
+        (memory, proc, false)
+    }
+}
+
 fn rts(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
     let target_address = stack_read_word(memory, proc);
     let delta = ProcDelta::empty()
@@ -968,6 +1084,17 @@ fn rts(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
     (memory, delta.apply_proc_delta(proc))
 }
 
+fn rti(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+    proc.processor_status = Flags::from_bits_truncate(stack_read_byte(memory, proc)) | Flags::ALWAYS;
+    proc.stack_pointer = proc.stack_pointer.wrapping_add(1);
+
+    let target_address = stack_read_word(memory, proc);
+    let delta = ProcDelta::empty()
+        .with_stack_pointer(proc.stack_pointer.wrapping_add(2))
+        .with_program_counter(target_address)
+        .with_cycles_count(6);
+    (memory, delta.apply_proc_delta(proc))
+}
 
 fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memory, Mos6510) {
     proc = ProcDelta::empty()
@@ -1028,6 +1155,7 @@ fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memo
         //assorted - need testing
         0x20 => jsr(memory, proc),
         0x60 => rts(memory, proc),
+        0x40 => rti(memory, proc),
         0x18 => clc(memory, proc),
         0x38 => sec(memory, proc),
         0xD8 => cld(memory, proc),
@@ -1045,7 +1173,6 @@ fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memo
 
 #[allow(dead_code)]
 fn process_control_loop(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
-    print!("{:#06x} ", proc.program_counter);
     let op_code = memory.read_byte(proc.program_counter);
     execute_opcode(memory, proc, op_code)
 }
@@ -1053,15 +1180,13 @@ fn process_control_loop(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510
 
 #[tokio::main]
 async fn main() {
-    let options = parse_boot_options();
+    let mut options = parse_boot_options();
     let mut memory = C64Memory::init_memory(
         "rom/64c.251913-01.bin",
         "rom/characters.901225-01.bin"
     );
-    if options.max_instructions.is_some() {
-        memory.trace = false;
-    }
-    let pc = memory.read_word(0xFFFC);
+    memory.trace = options.trace_memory;
+    let pc = memory.read_word(RESET_VECTOR);
     let mut proc = ProcDelta::empty()
         .with_program_counter(pc)
         .with_cycles_count(6)
@@ -1072,6 +1197,7 @@ async fn main() {
 
     let mut interval = time::interval(time::Duration::from_nanos(pal_duration));
     let mut i = 0;
+    let collect_trace = trace_enabled(&options);
     let mut trace = VecDeque::with_capacity(options.trace_tail);
     let mut has_entered_rom = is_rom_address(proc.program_counter);
     loop {
@@ -1089,14 +1215,30 @@ async fn main() {
             }
         }
 
-        if options.max_instructions.is_none() {
+        if options.verbose {
             println!("({})", i);
-            interval.tick().await;
             print!("{:#06x} ", proc.program_counter);
+        }
+        if options.max_instructions.is_none() {
+            interval.tick().await;
+        }
+
+        feed_typed_input(&mut memory, &proc, &mut options.typed_input);
+
+        let interrupt_start_cycles = proc.cycles_count;
+        let pending_interrupt = service_pending_interrupt(memory, proc);
+        memory = pending_interrupt.0;
+        proc = pending_interrupt.1;
+        if pending_interrupt.2 {
+            memory.tick(proc.cycles_count - interrupt_start_cycles);
+            i += 1;
+            continue;
         }
 
         let op_code = memory.read_byte(proc.program_counter);
-        remember_trace(&mut trace, TraceEntry::from_cpu(i, op_code, &memory, &proc), options.trace_tail);
+        if collect_trace {
+            remember_trace(&mut trace, TraceEntry::from_cpu(i, op_code, &memory, &proc), options.trace_tail);
+        }
 
         if options.stop_on_brk && op_code == 0x00 {
             println!(
@@ -1155,11 +1297,13 @@ async fn main() {
         let watched_stack_word_before = options
             .watch_stack_word
             .map(|address| read_raw_word(&memory, address));
+        let instruction_start_cycles = proc.cycles_count;
         let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(memory, proc, op_code)));
         match execution {
             Ok(res) => {
                 memory = res.0;
                 proc = res.1;
+                memory.tick(proc.cycles_count - instruction_start_cycles);
                 has_entered_rom = has_entered_rom || is_rom_address(proc.program_counter);
 
                 if let Some(address) = options.watch_stack_word {
@@ -1198,9 +1342,8 @@ async fn main() {
             }
         }
         
-        //dbg!(proc);
         i+=1;
-        if options.max_instructions.is_none() {
+        if options.verbose {
             print!(" ----- AddressMode {:?}", proc.addressing_mode);
             if i > 5 && proc.stack_pointer < 1 {
                 println!("Warning - stack pointer {}", proc.stack_pointer);
@@ -1228,6 +1371,8 @@ fn get_cpu() -> Mos6510 {
 
 #[cfg(test)] mod test_flags;
 #[cfg(test)] mod test_brk;
+#[cfg(test)] mod test_input;
+#[cfg(test)] mod test_interrupt;
 #[cfg(test)] mod test_ora;
 #[cfg(test)] mod test_and;
 #[cfg(test)] mod test_nop;

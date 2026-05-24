@@ -47,7 +47,7 @@ impl C64Memory {
         vic: VicII::new(),
         cia1: Cia::new_cia1(),
         cia2: Cia::new_cia2(),
-        trace: true
+        trace: false
     }
   }
 
@@ -178,6 +178,19 @@ impl C64Memory {
       0xDD00..=0xDDFF => self.cia2.write_byte(*pointer as u16, value),
       _ => self.ram[*pointer] = value
     }
+  }
+
+  pub fn tick(&mut self, cycles: usize) {
+    self.cia1.tick(cycles);
+    self.cia2.tick(cycles);
+  }
+
+  pub fn irq_pending(&self) -> bool {
+    self.cia1.irq_pending()
+  }
+
+  pub fn acknowledge_irq(&mut self) {
+    self.cia1.acknowledge_irq();
   }
 
   
