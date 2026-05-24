@@ -11,7 +11,7 @@ mod vic;
 use flags::{ Flags, AddressingMode, get_mode};
 use proc::{Mos6510, ProcDelta};
 use memory::C64Memory;
-use screen::render_text_screen;
+use screen::{render_text_screen, screen_code_to_ascii, SCREEN_HEIGHT, SCREEN_RAM_START, SCREEN_WIDTH};
 use std::num::Wrapping;
 use std::collections::VecDeque;
 use std::env;
@@ -33,6 +33,8 @@ struct BootOptions {
     stop_pc_range: Option<(u16, u16)>,
     watch_stack_word: Option<u16>,
     watch_stack_value: Option<u16>,
+    dump_zero_page: bool,
+    dump_screen_ram: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -102,6 +104,8 @@ fn parse_boot_options() -> BootOptions {
     let mut stop_pc_range = None;
     let mut watch_stack_word = None;
     let mut watch_stack_value = None;
+    let mut dump_zero_page = false;
+    let mut dump_screen_ram = false;
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
@@ -161,6 +165,12 @@ fn parse_boot_options() -> BootOptions {
                 });
                 watch_stack_value = Some(parse_u16_arg(&value, "--watch-stack-value"));
             },
+            "--dump-zero-page" => {
+                dump_zero_page = true;
+            },
+            "--dump-screen-ram" => {
+                dump_screen_ram = true;
+            },
             _ => panic!("unknown argument: {}", arg),
         }
     }
@@ -175,6 +185,8 @@ fn parse_boot_options() -> BootOptions {
         stop_pc_range,
         watch_stack_word,
         watch_stack_value,
+        dump_zero_page,
+        dump_screen_ram,
     }
 }
 
@@ -183,6 +195,65 @@ fn print_screen_snapshot(memory: &C64Memory, options: &BootOptions) {
         println!("C64 text screen:");
         println!("{}", render_text_screen(memory));
     }
+}
+
+fn print_hex_dump(memory: &C64Memory, start: usize, len: usize) {
+    for offset in (0..len).step_by(16) {
+        print!("{:#06x}:", start + offset);
+        for i in 0..16 {
+            if offset + i < len {
+                print!(" {:02x}", memory.ram[start + offset + i]);
+            } else {
+                print!("   ");
+            }
+        }
+        print!("  |");
+        for i in 0..16 {
+            if offset + i < len {
+                let value = memory.ram[start + offset + i];
+                let ch = if value.is_ascii_graphic() || value == b' ' {
+                    value as char
+                } else {
+                    '.'
+                };
+                print!("{}", ch);
+            }
+        }
+        println!("|");
+    }
+}
+
+fn print_zero_page_dump(memory: &C64Memory, options: &BootOptions) {
+    if options.dump_zero_page {
+        println!("Zero page RAM dump:");
+        print_hex_dump(memory, 0x0000, 0x0100);
+    }
+}
+
+fn print_screen_ram_dump(memory: &C64Memory, options: &BootOptions) {
+    if !options.dump_screen_ram {
+        return;
+    }
+
+    println!("Screen RAM dump:");
+    for row in 0..SCREEN_HEIGHT {
+        let row_start = SCREEN_RAM_START + row * SCREEN_WIDTH;
+        print!("{:#06x}:", row_start);
+        for col in 0..SCREEN_WIDTH {
+            print!(" {:02x}", memory.ram[row_start + col]);
+        }
+        print!("  |");
+        for col in 0..SCREEN_WIDTH {
+            print!("{}", screen_code_to_ascii(memory.ram[row_start + col]));
+        }
+        println!("|");
+    }
+}
+
+fn print_checkpoint_diagnostics(memory: &C64Memory, options: &BootOptions) {
+    print_screen_snapshot(memory, options);
+    print_zero_page_dump(memory, options);
+    print_screen_ram_dump(memory, options);
 }
 
 fn remember_trace(trace: &mut VecDeque<TraceEntry>, entry: TraceEntry, max_len: usize) {
@@ -666,7 +737,7 @@ fn ldy(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     //load to y register - todo - cycles/etc - and test
     proc.y_index = memory.read_byte(read_address);
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.x_index, None, (0,0), proc))
+    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.y_index, None, (0,0), proc))
 }
 
 fn sty(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -708,15 +779,13 @@ fn tsx(mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     proc.x_index = proc.stack_pointer;
-    proc.program_counter += 1;
-    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.x_index, None, (0,0), proc)
 }
 
 fn txs(mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     proc.stack_pointer = proc.x_index;
-    proc.program_counter += 1;
     proc
 }
 
@@ -1011,7 +1080,7 @@ async fn main() {
                     proc.cycles_count
                 );
                 print_trace_tail(&trace);
-                print_screen_snapshot(&memory, &options);
+                print_checkpoint_diagnostics(&memory, &options);
                 break;
             }
         }
@@ -1033,7 +1102,7 @@ async fn main() {
                 proc.cycles_count
             );
             print_trace_tail(&trace);
-            print_screen_snapshot(&memory, &options);
+            print_checkpoint_diagnostics(&memory, &options);
             break;
         }
 
@@ -1046,7 +1115,7 @@ async fn main() {
                     proc.cycles_count
                 );
                 print_trace_tail(&trace);
-                print_screen_snapshot(&memory, &options);
+                print_checkpoint_diagnostics(&memory, &options);
                 break;
             }
         }
@@ -1062,7 +1131,7 @@ async fn main() {
                     proc.cycles_count
                 );
                 print_trace_tail(&trace);
-                print_screen_snapshot(&memory, &options);
+                print_checkpoint_diagnostics(&memory, &options);
                 break;
             }
         }
@@ -1075,7 +1144,7 @@ async fn main() {
                 proc.cycles_count
             );
             print_trace_tail(&trace);
-            print_screen_snapshot(&memory, &options);
+            print_checkpoint_diagnostics(&memory, &options);
             break;
         }
 
@@ -1107,7 +1176,7 @@ async fn main() {
                             proc.cycles_count
                         );
                         print_trace_tail(&trace);
-                        print_screen_snapshot(&memory, &options);
+                        print_checkpoint_diagnostics(&memory, &options);
                         break;
                     }
                 }
@@ -1120,7 +1189,7 @@ async fn main() {
                     panic_summary(error)
                 );
                 print_trace_tail(&trace);
-                print_screen_snapshot(&memory, &options);
+                print_checkpoint_diagnostics(&memory, &options);
                 break;
             }
         }

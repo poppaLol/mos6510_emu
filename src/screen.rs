@@ -2,7 +2,7 @@ use crate::memory::C64Memory;
 
 pub const SCREEN_WIDTH: usize = 40;
 pub const SCREEN_HEIGHT: usize = 25;
-const SCREEN_RAM_START: usize = 0x0400;
+pub const SCREEN_RAM_START: usize = 0x0400;
 
 pub fn render_text_screen(memory: &C64Memory) -> String {
     let mut output = String::new();
@@ -21,7 +21,7 @@ pub fn render_text_screen(memory: &C64Memory) -> String {
     output
 }
 
-fn screen_code_to_ascii(code: u8) -> char {
+pub fn screen_code_to_ascii(code: u8) -> char {
     match code {
         0x00 => '@',
         0x01..=0x1A => (b'A' + code - 1) as char,

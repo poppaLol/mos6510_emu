@@ -124,6 +124,24 @@ cargo run -- --max-instructions 29060 --trace-tail 24
 
 In bounded mode, legacy per-read/write tracing is disabled and the runner prints a compact tail of recent CPU state when it reaches the instruction limit or hits an emulator panic. The trace includes the zero-page pointer at `$C1/$C2` and the effective `($C1),Y` address because the KERNAL RAM test uses that pair to walk memory. The default interactive mode remains available when no limit is passed.
 
+The bounded runner also has opt-in memory dumps for checkpoint debugging:
+
+```text
+cargo run -- --max-instructions 1000000 --trace-tail 4 --dump-zero-page --dump-screen-ram
+```
+
+`--dump-zero-page` prints `$0000..$00FF` as hex rows. `--dump-screen-ram` prints `$0400..$07E7` as 25 rows of raw screen codes plus the same rendered characters used by `--screen`.
+
+At the current million-instruction checkpoint, the emulator is stable in a KERNAL keyboard-buffer wait around `$E5CD..$E5D4`. `$C6`, `$CC`, and `$0292` are all zero, confirming the loop is waiting for input. Screen RAM is mostly spaces (`$20`) with two `$0A` screen codes at `$04F0` and `$0518`, so the missing BASIC banner is not just a renderer issue.
+
+The next CPU audit found and fixed several simple transfer/load semantics bugs:
+
+- `LDY` now sets `N/Z` from the loaded Y value, not the old X value.
+- `TSX` now advances the program counter by one byte and sets `N/Z` from the transferred X value.
+- `TXS` now advances the program counter by one byte and leaves flags unchanged.
+
+Focused tests cover these cases. After the fixes, the suite has 284 passing tests. The million-instruction boot checkpoint still reaches the `$E5CD..$E5D4` keyboard-buffer wait, so these were real CPU bugs but not the final reason the BASIC banner is missing. The screen artifact changed to one `$0A` screen code at `$0450`.
+
 The trace around `0xFD6E..0xFD84` currently looks like the KERNAL RAM test loop rather than a hard lock:
 
 ```text

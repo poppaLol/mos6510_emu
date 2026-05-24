@@ -1,4 +1,4 @@
-use super::{get_cpu, jsr, pha, php, pla, rts, stack_push_byte, stack_push_word, AddressingMode, C64Memory};
+use super::{get_cpu, jsr, pha, php, pla, rts, stack_push_byte, stack_push_word, tsx, txs, AddressingMode, C64Memory, Flags};
 
 #[test]
 fn stack_push_byte_wraps_stack_pointer_below_zero() {
@@ -68,6 +68,50 @@ fn php_pushes_status_and_decrements_stack_pointer() {
     assert_eq!(res.1.program_counter, 0xC001);
     assert_eq!(res.1.stack_pointer, 0xFE);
     assert_eq!(res.0.ram[0x01FF], cpu.processor_status.bits());
+}
+
+#[test]
+fn tsx_transfers_stack_pointer_to_x_and_advances_one_byte() {
+    let mut cpu = get_cpu();
+    cpu.addressing_mode = AddressingMode::Implied;
+    cpu.program_counter = 0xC000;
+    cpu.stack_pointer = 0x7F;
+    cpu.x_index = 0x00;
+
+    let res = tsx(cpu);
+
+    assert_eq!(res.program_counter, 0xC001);
+    assert_eq!(res.x_index, 0x7F);
+}
+
+#[test]
+fn tsx_sets_status_flags_from_x_register() {
+    let mut cpu = get_cpu();
+    cpu.addressing_mode = AddressingMode::Implied;
+    cpu.stack_pointer = 0x80;
+    cpu.accumulator = 0x00;
+    cpu.processor_status &= !Flags::N_FLAG;
+
+    let res = tsx(cpu);
+
+    assert!(res.processor_status.contains(Flags::N_FLAG));
+    assert!(!res.processor_status.contains(Flags::Z_FLAG));
+}
+
+#[test]
+fn txs_transfers_x_to_stack_pointer_and_advances_one_byte_without_flags() {
+    let mut cpu = get_cpu();
+    cpu.addressing_mode = AddressingMode::Implied;
+    cpu.program_counter = 0xC000;
+    cpu.stack_pointer = 0x00;
+    cpu.x_index = 0x80;
+    cpu.processor_status = Flags::ALWAYS | Flags::Z_FLAG;
+
+    let res = txs(cpu);
+
+    assert_eq!(res.program_counter, 0xC001);
+    assert_eq!(res.stack_pointer, 0x80);
+    assert_eq!(res.processor_status, Flags::ALWAYS | Flags::Z_FLAG);
 }
 
 #[test]
