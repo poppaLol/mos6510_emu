@@ -1,4 +1,4 @@
-use super::{get_cpu, jsr, pla, rts, stack_push_byte, stack_push_word, AddressingMode, C64Memory};
+use super::{get_cpu, jsr, pha, php, pla, rts, stack_push_byte, stack_push_word, AddressingMode, C64Memory};
 
 #[test]
 fn stack_push_byte_wraps_stack_pointer_below_zero() {
@@ -37,6 +37,37 @@ fn pla_wraps_stack_pointer_above_ff() {
 
     assert_eq!(res.1.stack_pointer, 0x00);
     assert_eq!(res.1.accumulator, 0x42);
+}
+
+#[test]
+fn pha_pushes_accumulator_and_decrements_stack_pointer() {
+    let mem = C64Memory::get_empty_mem();
+    let mut cpu = get_cpu();
+    cpu.addressing_mode = AddressingMode::Implied;
+    cpu.program_counter = 0xC000;
+    cpu.stack_pointer = 0xFF;
+    cpu.accumulator = 0x42;
+
+    let res = pha(mem, cpu);
+
+    assert_eq!(res.1.program_counter, 0xC001);
+    assert_eq!(res.1.stack_pointer, 0xFE);
+    assert_eq!(res.0.ram[0x01FF], 0x42);
+}
+
+#[test]
+fn php_pushes_status_and_decrements_stack_pointer() {
+    let mem = C64Memory::get_empty_mem();
+    let mut cpu = get_cpu();
+    cpu.addressing_mode = AddressingMode::Implied;
+    cpu.program_counter = 0xC000;
+    cpu.stack_pointer = 0xFF;
+
+    let res = php(mem, cpu);
+
+    assert_eq!(res.1.program_counter, 0xC001);
+    assert_eq!(res.1.stack_pointer, 0xFE);
+    assert_eq!(res.0.ram[0x01FF], cpu.processor_status.bits());
 }
 
 #[test]

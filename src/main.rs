@@ -31,6 +31,8 @@ struct BootOptions {
     stop_outside_rom: bool,
     stop_pc: Option<u16>,
     stop_pc_range: Option<(u16, u16)>,
+    watch_stack_word: Option<u16>,
+    watch_stack_value: Option<u16>,
 }
 
 #[derive(Copy, Clone)]
@@ -49,11 +51,14 @@ struct TraceEntry {
     memory_latch: u8,
     cia2_port_a: u8,
     cia2_data_direction_a: u8,
+    stack_next_word: u16,
 }
 
 impl TraceEntry {
     fn from_cpu(index: usize, op_code: u8, memory: &C64Memory, proc: &Mos6510) -> TraceEntry {
         let c1_pointer = (memory.ram[0xC2] as u16) << 8 | memory.ram[0xC1] as u16;
+        let stack_low = 0x100 + proc.stack_pointer.wrapping_add(1) as usize;
+        let stack_high = 0x100 + proc.stack_pointer.wrapping_add(2) as usize;
 
         TraceEntry {
             index,
@@ -70,6 +75,7 @@ impl TraceEntry {
             memory_latch: memory.ram[1],
             cia2_port_a: memory.cia2.read_byte(0xDD00),
             cia2_data_direction_a: memory.cia2.read_byte(0xDD02),
+            stack_next_word: (memory.ram[stack_high] as u16) << 8 | memory.ram[stack_low] as u16,
         }
     }
 }
@@ -94,6 +100,8 @@ fn parse_boot_options() -> BootOptions {
     let mut stop_outside_rom = false;
     let mut stop_pc = None;
     let mut stop_pc_range = None;
+    let mut watch_stack_word = None;
+    let mut watch_stack_value = None;
     let mut args = env::args().skip(1);
 
     while let Some(arg) = args.next() {
@@ -141,6 +149,18 @@ fn parse_boot_options() -> BootOptions {
                     parse_u16_arg(&end, "--stop-pc-range end"),
                 ));
             },
+            "--watch-stack-word" => {
+                let value = args.next().unwrap_or_else(|| {
+                    panic!("--watch-stack-word requires an address");
+                });
+                watch_stack_word = Some(parse_u16_arg(&value, "--watch-stack-word"));
+            },
+            "--watch-stack-value" => {
+                let value = args.next().unwrap_or_else(|| {
+                    panic!("--watch-stack-value requires a value");
+                });
+                watch_stack_value = Some(parse_u16_arg(&value, "--watch-stack-value"));
+            },
             _ => panic!("unknown argument: {}", arg),
         }
     }
@@ -153,6 +173,8 @@ fn parse_boot_options() -> BootOptions {
         stop_outside_rom,
         stop_pc,
         stop_pc_range,
+        watch_stack_word,
+        watch_stack_value,
     }
 }
 
@@ -181,7 +203,7 @@ fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
     println!("Recent instruction trace:");
     for entry in trace {
         println!(
-            "#{:<6} PC={:#06x} OP={:#04x} PTR_C1={:#06x} EFF_C1Y={:#06x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} SR={:#04x} LATCH={:#04x} DD00={:#04x} DD02={:#04x} CC={}",
+            "#{:<6} PC={:#06x} OP={:#04x} PTR_C1={:#06x} EFF_C1Y={:#06x} A={:#04x} X={:#04x} Y={:#04x} SP={:#04x} RET={:#06x} SR={:#04x} LATCH={:#04x} DD00={:#04x} DD02={:#04x} CC={}",
             entry.index,
             entry.pc,
             entry.op_code,
@@ -191,6 +213,7 @@ fn print_trace_tail(trace: &VecDeque<TraceEntry>) {
             entry.x_index,
             entry.y_index,
             entry.stack_pointer,
+            entry.stack_next_word,
             entry.processor_status,
             entry.memory_latch,
             entry.cia2_port_a,
@@ -206,6 +229,13 @@ fn is_rom_address(address: u16) -> bool {
 
 fn is_ram_code_address(address: u16) -> bool {
     matches!(address, 0x0200..=0x9FFF | 0xC000..=0xCFFF)
+}
+
+fn read_raw_word(memory: &C64Memory, address: u16) -> u16 {
+    let low_address = address as usize;
+    let high_address = address.wrapping_add(1) as usize;
+
+    (memory.ram[high_address] as u16) << 8 | memory.ram[low_address] as u16
 }
 
 fn panic_summary(error: Box<dyn std::any::Any + Send>) -> String {
@@ -702,8 +732,7 @@ fn pla(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
 fn pha(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
-    stack_push_byte(memory, proc, proc.accumulator);
-    (memory, proc)
+    stack_push_byte(memory, proc, proc.accumulator)
 }
 
 
@@ -719,8 +748,7 @@ fn plp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
 fn php(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
-    stack_push_byte(memory, proc, proc.processor_status.bits());
-    (memory, proc)
+    stack_push_byte(memory, proc, proc.processor_status.bits())
 }
 
 fn branch_on(memory: C64Memory, mut proc: Mos6510, branch_cond: bool) -> (C64Memory, Mos6510) {
@@ -1051,12 +1079,38 @@ async fn main() {
             break;
         }
 
+        let watched_stack_word_before = options
+            .watch_stack_word
+            .map(|address| read_raw_word(&memory, address));
         let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(memory, proc, op_code)));
         match execution {
             Ok(res) => {
                 memory = res.0;
                 proc = res.1;
                 has_entered_rom = has_entered_rom || is_rom_address(proc.program_counter);
+
+                if let Some(address) = options.watch_stack_word {
+                    let before = watched_stack_word_before.unwrap();
+                    let after = read_raw_word(&memory, address);
+                    let matches_value = options
+                        .watch_stack_value
+                        .map_or(true, |expected| after == expected);
+
+                    if before != after && matches_value {
+                        println!(
+                            "Checkpoint: stack word {:#06x} changed from {:#06x} to {:#06x} after instruction {} at PC={:#06x}, cycles={}",
+                            address,
+                            before,
+                            after,
+                            i,
+                            trace.back().map_or(0, |entry| entry.pc),
+                            proc.cycles_count
+                        );
+                        print_trace_tail(&trace);
+                        print_screen_snapshot(&memory, &options);
+                        break;
+                    }
+                }
             },
             Err(error) => {
                 println!(

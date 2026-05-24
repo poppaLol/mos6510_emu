@@ -99,6 +99,14 @@ Absolute-indirect `JMP (addr)` now reproduces the original 6502 page-boundary qu
 - A pointer at `$1234` reads low byte from `$1234` and high byte from `$1235`.
 - A pointer at `$12FF` reads low byte from `$12FF` and high byte from `$1200`, not `$1300`.
 
+Stack tracing exposed one more boot-critical CPU bug:
+
+- The bad return to `$3BEF` was caused by an `RTS` reading a mixed stack word, not by a direct write of `$3BEE`.
+- `$0103` held the low byte of a normal `$F339: JSR $EDFE` return, and `$0102` held the high byte of a normal `$EE00: JSR $ED11` return.
+- The underlying stack drift came from `PHA` and `PHP`: both called `stack_push_byte`, but discarded the returned memory and CPU state, so pushes did not persist while later pulls still advanced `SP`.
+- `PHA` and `PHP` now return the `stack_push_byte` result, and stack tests cover both instructions decrementing `SP` and storing the pushed byte.
+- With that fixed, the old `$0102 == $3BEE` watchpoint no longer fires by 600,000 instructions; the boot path instead reaches a later KERNAL loop around `$E5CD..$E5D4` with `SP=$F3`.
+
 The suite was green after these changes:
 
 ```text
