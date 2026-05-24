@@ -14,8 +14,8 @@ fn when_cpx_given_x_reg_and_target_addr_same_zero_flag_set() {
   mem.ram[0x4] = 3;
 
   let res = cpx(mem,cpu);
-  assert!(!res.1.processor_status.contains(Flags::C_FLAG | Flags::N_FLAG));
-  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::Z_FLAG))
+  assert!(!res.1.processor_status.contains(Flags::N_FLAG));
+  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::C_FLAG | Flags::Z_FLAG))
 }
 
 #[test]
@@ -30,8 +30,8 @@ fn when_cpx_given_x_reg_gt_target_addr_flags_not_set() {
   mem.ram[0x4] = 3;
 
   let res = cpx(mem,cpu);
-  assert!(!res.1.processor_status.contains(Flags::C_FLAG | Flags::N_FLAG | Flags::Z_FLAG));
-  assert!(res.1.processor_status.contains(Flags::ALWAYS))
+  assert!(!res.1.processor_status.contains(Flags::N_FLAG | Flags::Z_FLAG));
+  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::C_FLAG))
 }
 
 #[test]
@@ -46,8 +46,8 @@ fn when_cpx_given_x_reg_lt_target_addr_flags_not_set() {
   mem.ram[0x4] = 3;
 
   let res = cpx(mem,cpu);
-  assert!(!res.1.processor_status.contains(Flags::Z_FLAG));
-  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::C_FLAG | Flags::N_FLAG))
+  assert!(!res.1.processor_status.contains(Flags::C_FLAG | Flags::Z_FLAG));
+  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::N_FLAG))
 }
 
 #[test]
@@ -62,8 +62,7 @@ fn when_cpy_given_y_reg_and_target_addr_same_zero_flag_set() {
   mem.ram[0x4] = 3;
 
   let res = cpy(mem,cpu);
-  assert!(!res.1.processor_status.contains(Flags::C_FLAG));
-  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::Z_FLAG))
+  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::C_FLAG | Flags::Z_FLAG))
 }
 
 
@@ -79,8 +78,8 @@ fn when_cpy_given_y_reg_gt_target_addr_flags_not_set() {
   mem.ram[0x4] = 3;
 
   let res = cpy(mem,cpu);
-  assert!(!res.1.processor_status.contains(Flags::C_FLAG | Flags::N_FLAG | Flags::Z_FLAG));
-  assert!(res.1.processor_status.contains(Flags::ALWAYS))
+  assert!(!res.1.processor_status.contains(Flags::N_FLAG | Flags::Z_FLAG));
+  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::C_FLAG))
 }
 
 #[test]
@@ -95,8 +94,8 @@ fn when_cpy_given_y_reg_lt_target_addr_flags_not_set() {
   mem.ram[0x4] = 3;
 
   let res = cpy(mem,cpu);
-  assert!(!res.1.processor_status.contains(Flags::Z_FLAG));
-  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::C_FLAG | Flags::N_FLAG))
+  assert!(!res.1.processor_status.contains(Flags::C_FLAG | Flags::Z_FLAG));
+  assert!(res.1.processor_status.contains(Flags::ALWAYS | Flags::N_FLAG))
 }
 
 #[test]

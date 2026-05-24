@@ -51,3 +51,29 @@ fn when_bpl_branch_taken_across_page_boundary_cycles_inc_by_4() {
   assert_eq!(res.1.program_counter, 0xEFFE); //jump is taken - minus 5 to PC plus 2 from reading instructions
   assert_eq!(res.1.cycles_count, 4) //jump is taken - adds extra to cycles
 }
+
+#[test]
+fn when_bpl_branch_target_crosses_from_next_instruction_cycles_inc_by_4() {
+  let mut mem = C64Memory::get_empty_mem();
+  let mut cpu = get_cpu();
+  cpu.addressing_mode = AddressingMode::Relative;
+  cpu.processor_status = Flags::ALWAYS; //i.e. neg flag not set
+  cpu.program_counter = 0x10FD;
+  mem.ram[0x10FE] = 0x01; // next instruction is 0x10FF, target is 0x1100
+  let res = bpl(mem, cpu);
+  assert_eq!(res.1.program_counter, 0x1100);
+  assert_eq!(res.1.cycles_count, 4)
+}
+
+#[test]
+fn when_bpl_branch_stays_on_page_from_next_instruction_cycles_inc_by_3() {
+  let mut mem = C64Memory::get_empty_mem();
+  let mut cpu = get_cpu();
+  cpu.addressing_mode = AddressingMode::Relative;
+  cpu.processor_status = Flags::ALWAYS; //i.e. neg flag not set
+  cpu.program_counter = 0x10FE;
+  mem.ram[0x10FF] = 0x00; // next instruction and target are both 0x1100
+  let res = bpl(mem, cpu);
+  assert_eq!(res.1.program_counter, 0x1100);
+  assert_eq!(res.1.cycles_count, 3)
+}

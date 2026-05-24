@@ -347,6 +347,17 @@ fn set_proc_status(flag_mask: Flags, value: u8, wrapping: Option<u8>, overflow_t
     proc
 }
 
+fn set_compare_status(left: u8, right: u8, proc: Mos6510) -> Mos6510 {
+    let diff = left.wrapping_sub(right);
+    let mut proc = set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, diff, None, (0,0), proc);
+    if left >= right {
+        proc.processor_status |= Flags::C_FLAG;
+    } else {
+        proc.processor_status &= !Flags::C_FLAG;
+    }
+    proc
+}
+
 
 fn zero_page_add(base: u8, offset: u8) -> u16 {
     base.wrapping_add(offset) as u16
@@ -515,10 +526,8 @@ fn cmp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    let diff = Wrapping(proc.accumulator) - Wrapping(right_operand);
-    let carry = proc.accumulator.checked_sub(right_operand);
     //nb - does not set the accumulator
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, diff.0, carry, (0,0), proc))
+    (memory, set_compare_status(proc.accumulator, right_operand, proc))
 }
 
 fn cpx(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -529,10 +538,7 @@ fn cpx(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
-    let diff = Wrapping(proc.x_index) - Wrapping(right_operand);
-    let carry = proc.x_index.checked_sub(right_operand);
-
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, diff.0, carry, (0,0), proc))
+    (memory, set_compare_status(proc.x_index, right_operand, proc))
 }
 
 fn cpy(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -543,10 +549,7 @@ fn cpy(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
-    let diff = Wrapping(proc.y_index) - Wrapping(right_operand);
-    let carry = proc.y_index.checked_sub(right_operand);
-
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, diff.0, carry, (0,0), proc))
+    (memory, set_compare_status(proc.y_index, right_operand, proc))
 }
 
 fn dec(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
@@ -822,14 +825,15 @@ fn php(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
 
 fn branch_on(memory: C64Memory, mut proc: Mos6510, branch_cond: bool) -> (C64Memory, Mos6510) {
     let mut extra = 0;
+    let next_instruction = proc.program_counter.wrapping_add(proc.addressing_mode.bytes_increment());
     if branch_cond {
-        let original_address = proc.program_counter;
         let read_address = get_read_address(&memory, &proc);
         let jump_offset = memory.read_byte(read_address) as i8;
-        proc.program_counter = (proc.program_counter as i32 + jump_offset as i32) as u16;
-        extra = 1 + proc.addressing_mode.crossed_page_boundary(original_address, proc.program_counter);
+        proc.program_counter = (next_instruction as i32 + jump_offset as i32) as u16;
+        extra = 1 + proc.addressing_mode.crossed_page_boundary(next_instruction, proc.program_counter);
+    } else {
+        proc.program_counter = next_instruction;
     }
-    proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
     
     (memory, proc)

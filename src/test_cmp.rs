@@ -10,8 +10,8 @@ fn when_acc_and_target_addr_same_zero_flag_set() {
   mem.ram[4] = 3;
   let res = cmp(mem,cpu);
   
-  assert!(!res.1.processor_status.intersects(Flags::C_FLAG | Flags::N_FLAG));
-  assert!(res.1.processor_status.contains(Flags::Z_FLAG))
+  assert!(!res.1.processor_status.contains(Flags::N_FLAG));
+  assert!(res.1.processor_status.contains(Flags::C_FLAG | Flags::Z_FLAG))
 }
 
 #[test]
@@ -24,7 +24,8 @@ fn when_acc_gt_target_addr_same_zero_flag_not_set() {
   mem.ram[4] = 2;
   let res = cmp(mem,cpu);
   
-  assert!(!res.1.processor_status.intersects(Flags::Z_FLAG | Flags::C_FLAG | Flags::N_FLAG));
+  assert!(!res.1.processor_status.intersects(Flags::Z_FLAG | Flags::N_FLAG));
+  assert!(res.1.processor_status.contains(Flags::C_FLAG));
 }
 
 #[test]
@@ -37,7 +38,8 @@ fn when_acc_lt_target_addr_same_zero_flag_not_set() {
   mem.ram[4] = 4;
   let res = cmp(mem,cpu);
   
-  assert!(res.1.processor_status.intersects(Flags::Z_FLAG | Flags::C_FLAG | Flags::N_FLAG));
+  assert!(!res.1.processor_status.intersects(Flags::Z_FLAG | Flags::C_FLAG));
+  assert!(res.1.processor_status.contains(Flags::N_FLAG));
 }
 
 #[test]
