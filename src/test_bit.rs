@@ -9,9 +9,9 @@ fn bit_zero_page_sets_zero_when_accumulator_and_memory_have_no_common_bits() {
     mem.ram[1] = 0x80;
     mem.ram[0x80] = 0xF0;
 
-    let res = bit(mem, cpu);
+    let res = bit(&mut mem, cpu);
 
-    assert!(res.1.processor_status.contains(Flags::Z_FLAG));
+    assert!(res.processor_status.contains(Flags::Z_FLAG));
 }
 
 #[test]
@@ -24,9 +24,9 @@ fn bit_zero_page_clears_zero_when_accumulator_and_memory_share_bits() {
     mem.ram[1] = 0x80;
     mem.ram[0x80] = 0x01;
 
-    let res = bit(mem, cpu);
+    let res = bit(&mut mem, cpu);
 
-    assert!(!res.1.processor_status.contains(Flags::Z_FLAG));
+    assert!(!res.processor_status.contains(Flags::Z_FLAG));
 }
 
 #[test]
@@ -37,10 +37,10 @@ fn bit_copies_negative_and_overflow_from_memory_operand() {
     mem.ram[1] = 0x80;
     mem.ram[0x80] = 0xC0;
 
-    let res = bit(mem, cpu);
+    let res = bit(&mut mem, cpu);
 
-    assert!(res.1.processor_status.contains(Flags::N_FLAG));
-    assert!(res.1.processor_status.contains(Flags::V_FLAG));
+    assert!(res.processor_status.contains(Flags::N_FLAG));
+    assert!(res.processor_status.contains(Flags::V_FLAG));
 }
 
 #[test]
@@ -52,10 +52,10 @@ fn bit_clears_negative_and_overflow_when_memory_operand_bits_are_clear() {
     mem.ram[1] = 0x80;
     mem.ram[0x80] = 0x3F;
 
-    let res = bit(mem, cpu);
+    let res = bit(&mut mem, cpu);
 
-    assert!(!res.1.processor_status.contains(Flags::N_FLAG));
-    assert!(!res.1.processor_status.contains(Flags::V_FLAG));
+    assert!(!res.processor_status.contains(Flags::N_FLAG));
+    assert!(!res.processor_status.contains(Flags::V_FLAG));
 }
 
 #[test]
@@ -65,10 +65,10 @@ fn bit_zero_page_advances_program_counter_and_cycles() {
     cpu.addressing_mode = AddressingMode::ZeroPage;
     mem.ram[1] = 0x80;
 
-    let res = bit(mem, cpu);
+    let res = bit(&mut mem, cpu);
 
-    assert_eq!(res.1.program_counter, 2);
-    assert_eq!(res.1.cycles_count, 3);
+    assert_eq!(res.program_counter, 2);
+    assert_eq!(res.cycles_count, 3);
 }
 
 #[test]
@@ -79,8 +79,8 @@ fn bit_absolute_advances_program_counter_and_cycles() {
     mem.ram[1] = 0x34;
     mem.ram[2] = 0x12;
 
-    let res = bit(mem, cpu);
+    let res = bit(&mut mem, cpu);
 
-    assert_eq!(res.1.program_counter, 3);
-    assert_eq!(res.1.cycles_count, 4);
+    assert_eq!(res.program_counter, 3);
+    assert_eq!(res.cycles_count, 4);
 }
