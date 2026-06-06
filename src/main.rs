@@ -481,12 +481,12 @@ fn nop(mut proc: Mos6510) -> Mos6510 {
     proc
 }
 
-fn brk(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn brk(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += 2;
     interrupt(memory, proc, Interrupt::Irq, true)
 }
 
-fn ora(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn ora(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary(proc.program_counter + 1, read_address);
     proc.accumulator |= memory.read_byte(read_address);
@@ -494,10 +494,10 @@ fn ora(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
 }
 
-fn and(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn and(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary(proc.program_counter + 1, read_address);
     proc.accumulator &= memory.read_byte(read_address);
@@ -505,19 +505,19 @@ fn and(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
 }
 
-fn anc(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn anc(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let temp = and(memory, proc);
-    let carry_option: Option<u8> = match temp.1.processor_status.intersects(Flags::N_FLAG) {
+    let carry_option: Option<u8> = match temp.processor_status.intersects(Flags::N_FLAG) {
         true => None,
         false => Some(0)
     };
-    (temp.0, set_proc_status(Flags::C_FLAG, 0, carry_option, (0,0), temp.1))
+    set_proc_status(Flags::C_FLAG, 0, carry_option, (0,0), temp)
 }
 
-fn eor(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn eor(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary_indy(proc.program_counter + 1, read_address);
     proc.accumulator ^= memory.read_byte(read_address);
@@ -525,10 +525,10 @@ fn eor(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
 }
 
-fn bit(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bit(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let value = memory.read_byte(read_address);
 
@@ -548,10 +548,10 @@ fn bit(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         false => proc.processor_status &= !Flags::V_FLAG
     };
 
-    (memory, proc)
+    proc
 }
 
-fn adc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn adc(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary_xzero(proc.program_counter + 1, read_address);
 
@@ -566,12 +566,12 @@ fn adc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     let sum = proc.accumulator as u16 + right_operand as u16 + extra_add;
     let carry = if sum > 0xFF { None } else { Some(sum as u8) };
     proc.accumulator = sum as u8;
-    (memory, set_proc_status(
+    set_proc_status(
         Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG | Flags::V_FLAG,
-        proc.accumulator, carry, (orig_val, proc.accumulator), proc))
+        proc.accumulator, carry, (orig_val, proc.accumulator), proc)
 }
 
-fn sbc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn sbc(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary_indy(proc.program_counter + 1, read_address);
 
@@ -591,12 +591,12 @@ fn sbc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         Some(sum as u8)
     };
     proc.accumulator = sum as u8;
-    (memory, set_proc_status(
+    set_proc_status(
         Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG | Flags::V_FLAG,
-        proc.accumulator, carry, (orig_val, proc.accumulator), proc))
+        proc.accumulator, carry, (orig_val, proc.accumulator), proc)
 }
 
-fn cmp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn cmp(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary_indy(proc.program_counter + 1, read_address);
 
@@ -606,10 +606,10 @@ fn cmp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
     //nb - does not set the accumulator
-    (memory, set_compare_status(proc.accumulator, right_operand, proc))
+    set_compare_status(proc.accumulator, right_operand, proc)
 }
 
-fn cpx(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn cpx(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
 
     let right_operand = memory.read_byte(read_address);
@@ -617,10 +617,10 @@ fn cpx(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
-    (memory, set_compare_status(proc.x_index, right_operand, proc))
+    set_compare_status(proc.x_index, right_operand, proc)
 }
 
-fn cpy(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn cpy(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
 
     let right_operand = memory.read_byte(read_address);
@@ -628,10 +628,10 @@ fn cpy(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
-    (memory, set_compare_status(proc.y_index, right_operand, proc))
+    set_compare_status(proc.y_index, right_operand, proc)
 }
 
-fn dec(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn dec(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
 
     let orig_value = memory.read_byte(read_address);
@@ -642,28 +642,28 @@ fn dec(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     let res = Wrapping(orig_value) - Wrapping(1);
     memory.write_byte(&(read_address as usize), res.0);
     
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc)
 }
 
-fn dex(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn dex(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
     let res = Wrapping(proc.x_index) - Wrapping(1);
     proc.x_index = res.0;
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc)
 }
 
-fn dey(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn dey(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
     let res = Wrapping(proc.y_index) - Wrapping(1);
     proc.y_index = res.0;
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc)
 }
 
-fn inc(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn inc(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
 
     let orig_value = memory.read_byte(read_address);
@@ -674,29 +674,29 @@ fn inc(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     let res = Wrapping(orig_value) + Wrapping(1);
     memory.write_byte(&(read_address as usize), res.0);
     
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc)
 }
 
-fn inx(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn inx(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
     let res = Wrapping(proc.x_index) + Wrapping(1);
     proc.x_index = res.0;
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc)
 }
 
-fn iny(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn iny(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
 
     let res = Wrapping(proc.y_index) + Wrapping(1);
     proc.y_index = res.0;
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, res.0, None, (0,0), proc)
 }
 
 
-fn asl(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn asl(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let orig_val = if matches!(proc.addressing_mode, AddressingMode::Implied) { 
         (proc.accumulator, None)
     } else {
@@ -714,10 +714,10 @@ fn asl(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         _ => memory.write_byte(&(orig_val.1.unwrap() as usize), res)
     }
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc)
 }
 
-fn rol(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn rol(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let orig_val = if matches!(proc.addressing_mode, AddressingMode::Implied) { 
         (proc.accumulator, None)
     } else {
@@ -735,10 +735,10 @@ fn rol(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         _ => memory.write_byte(&(orig_val.1.unwrap() as usize), res)
     }
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc)
 }
 
-fn lsr(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn lsr(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let orig_val = if matches!(proc.addressing_mode, AddressingMode::Implied) { 
         (proc.accumulator, None)
     } else {
@@ -756,10 +756,10 @@ fn lsr(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         _ => memory.write_byte(&(orig_val.1.unwrap() as usize), res)
     }
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc)
 }
 
-fn ror(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn ror(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let orig_val = if matches!(proc.addressing_mode, AddressingMode::Implied) { 
         (proc.accumulator, None)
     } else {
@@ -777,10 +777,10 @@ fn ror(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         _ => memory.write_byte(&(orig_val.1.unwrap() as usize), res)
     }
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG | Flags::C_FLAG, res, shifted_out, (0,0), proc)
 }
 
-fn lda(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn lda(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     let extra = proc.addressing_mode.crossed_page_boundary(proc.program_counter + 1, read_address);
     proc.accumulator = memory.read_byte(read_address);
@@ -788,45 +788,45 @@ fn lda(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
 
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
 }
 
-fn sta(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn sta(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let write_address = get_read_address(&memory, &proc);
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0); //todo - ensure correct vals
     memory.write_byte(&(write_address as usize), proc.accumulator);
-    (memory, proc)
+    proc
 }
 
-fn ldx(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn ldx(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     //load to x register - todo - cycles/etc - and test
     proc.x_index = memory.read_byte(read_address);
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.x_index, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.x_index, None, (0,0), proc)
 }
 
-fn stx(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn stx(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let write_address = get_read_address(&memory, &proc);
     memory.write_byte(&(write_address as usize), proc.x_index);
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn ldy(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn ldy(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let read_address = get_read_address(&memory, &proc);
     //load to y register - todo - cycles/etc - and test
     proc.y_index = memory.read_byte(read_address);
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.y_index, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.y_index, None, (0,0), proc)
 }
 
-fn sty(mut memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn sty(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let write_address = get_read_address(&memory, &proc);
     memory.write_byte(&(write_address as usize), proc.y_index);
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
 fn tax(mut proc: Mos6510) -> Mos6510 {
@@ -871,38 +871,38 @@ fn txs(mut proc: Mos6510) -> Mos6510 {
     proc
 }
 
-fn pla(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn pla(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     proc.accumulator = stack_read_byte(memory, proc);
     let delta = ProcDelta::empty().with_stack_pointer(proc.stack_pointer.wrapping_add(1));
     proc = delta.apply_proc_delta(proc);
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
 }
 
-fn pha(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn pha(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     stack_push_byte(memory, proc, proc.accumulator)
 }
 
 
-fn plp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn plp(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     proc.processor_status = Flags::from_bits(stack_read_byte(memory, proc)).unwrap_or(Flags::ALWAYS);
     proc = ProcDelta::empty().with_stack_pointer(proc.stack_pointer.wrapping_add(1)).apply_proc_delta(proc);
-    (memory, set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc))
+    set_proc_status(Flags::N_FLAG | Flags::Z_FLAG, proc.accumulator, None, (0,0), proc)
 }
 
 
-fn php(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn php(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter += proc.addressing_mode.bytes_increment();
     proc.cycles_count += proc.addressing_mode.cycles_increment(0);
     stack_push_byte(memory, proc, proc.processor_status.bits())
 }
 
-fn branch_on(memory: C64Memory, mut proc: Mos6510, branch_cond: bool) -> (C64Memory, Mos6510) {
+fn branch_on(memory: &mut C64Memory, mut proc: Mos6510, branch_cond: bool) -> Mos6510 {
     let mut extra = 0;
     let next_instruction = proc.program_counter.wrapping_add(proc.addressing_mode.bytes_increment());
     if branch_cond {
@@ -915,130 +915,130 @@ fn branch_on(memory: C64Memory, mut proc: Mos6510, branch_cond: bool) -> (C64Mem
     }
     proc.cycles_count += proc.addressing_mode.cycles_increment(extra);
     
-    (memory, proc)
+    proc
 }
 
-fn bpl(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bpl(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = !proc.processor_status.contains(Flags::N_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn bmi(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bmi(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = proc.processor_status.contains(Flags::N_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn bvc(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bvc(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = !proc.processor_status.contains(Flags::V_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn bvs(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bvs(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = proc.processor_status.contains(Flags::V_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn bcc(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bcc(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = !proc.processor_status.contains(Flags::C_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn bcs(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bcs(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = proc.processor_status.contains(Flags::C_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn bne(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn bne(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = !proc.processor_status.contains(Flags::Z_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn beq(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn beq(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let cond = proc.processor_status.contains(Flags::Z_FLAG);
     branch_on(memory, proc, cond)
 }
 
-fn jmp(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn jmp(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.program_counter = get_read_address(&memory, &proc);
-    (memory, proc)
+    proc
 }
 
 
-fn clc(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn clc(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status & !Flags::C_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
 
-fn sec(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn sec(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status | Flags::C_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn cld(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn cld(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status & !Flags::D_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn sed(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn sed(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status | Flags::D_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn cli(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn cli(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status & !Flags::I_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn sei(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn sei(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status | Flags::I_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn clv(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn clv(_memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = proc.processor_status & !Flags::V_FLAG;
     proc.program_counter += proc.addressing_mode.bytes_increment();
-    (memory, proc)
+    proc
 }
 
-fn jsr(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn jsr(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     let rts = proc.program_counter + 2;
     proc.program_counter = memory.read_word(proc.program_counter + 1);
     let mut res = stack_push_word(memory, proc, rts);
-    res.1.cycles_count += 6;
+    res.cycles_count += 6;
     res
 }
 
 
-fn stack_push_word(mut memory: C64Memory, mut proc: Mos6510, val: u16) -> (C64Memory, Mos6510) {
+fn stack_push_word(memory: &mut C64Memory, mut proc: Mos6510, val: u16) -> Mos6510 {
     memory.stack_push_word(proc.stack_pointer as usize, val);
     proc.stack_pointer = proc.stack_pointer.wrapping_sub(2);
-    (memory, proc)
+    proc
 }
 
 
-fn stack_push_byte(mut memory: C64Memory, mut proc: Mos6510, val: u8) -> (C64Memory, Mos6510) {
+fn stack_push_byte(memory: &mut C64Memory, mut proc: Mos6510, val: u8) -> Mos6510 {
     memory.stack_push_byte(proc.stack_pointer as usize, val);
     proc.stack_pointer = proc.stack_pointer.wrapping_sub(1);
-    (memory, proc)
+    proc
 }
 
 
-fn stack_read_word(mut memory: C64Memory, proc: Mos6510) -> u16 {
+fn stack_read_word(memory: &mut C64Memory, proc: Mos6510) -> u16 {
     memory.stack_pop_word(proc.stack_pointer as u16)
 }
 
-fn stack_read_byte(mut memory: C64Memory, proc: Mos6510) -> u8 {
+fn stack_read_byte(memory: &mut C64Memory, proc: Mos6510) -> u8 {
     memory.stack_pop_byte(proc.stack_pointer as u16)
 }
 
-fn interrupt(memory: C64Memory, mut proc: Mos6510, interrupt: Interrupt, break_flag: bool) -> (C64Memory, Mos6510) {
+fn interrupt(memory: &mut C64Memory, mut proc: Mos6510, interrupt: Interrupt, break_flag: bool) -> Mos6510 {
     let vector = match interrupt {
         Interrupt::Nmi => NMI_VECTOR,
         Interrupt::Irq => IRQ_BRK_VECTOR,
@@ -1061,30 +1061,28 @@ fn interrupt(memory: C64Memory, mut proc: Mos6510, interrupt: Interrupt, break_f
     proc.cycles_count += 7;
 
     let with_stored_pc = stack_push_word(memory, proc, return_address);
-    stack_push_byte(with_stored_pc.0, with_stored_pc.1, stored_status.bits())
+    stack_push_byte(memory, with_stored_pc, stored_status.bits())
 }
 
-fn service_pending_interrupt(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510, bool) {
-    let mut memory = memory;
+fn service_pending_interrupt(memory: &mut C64Memory, proc: Mos6510) -> (Mos6510, bool) {
     if memory.irq_pending() && !proc.processor_status.contains(Flags::I_FLAG) {
         memory.acknowledge_irq();
-        let res = interrupt(memory, proc, Interrupt::Irq, false);
-        (res.0, res.1, true)
+        (interrupt(memory, proc, Interrupt::Irq, false), true)
     } else {
-        (memory, proc, false)
+        (proc, false)
     }
 }
 
-fn rts(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn rts(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let target_address = stack_read_word(memory, proc);
     let delta = ProcDelta::empty()
         .with_stack_pointer(proc.stack_pointer.wrapping_add(2))
         .with_program_counter(target_address.wrapping_add(1))
         .with_cycles_count(6);
-    (memory, delta.apply_proc_delta(proc))
+    delta.apply_proc_delta(proc)
 }
 
-fn rti(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
+fn rti(memory: &mut C64Memory, mut proc: Mos6510) -> Mos6510 {
     proc.processor_status = Flags::from_bits_truncate(stack_read_byte(memory, proc)) | Flags::ALWAYS;
     proc.stack_pointer = proc.stack_pointer.wrapping_add(1);
 
@@ -1093,16 +1091,16 @@ fn rti(memory: C64Memory, mut proc: Mos6510) -> (C64Memory, Mos6510) {
         .with_stack_pointer(proc.stack_pointer.wrapping_add(2))
         .with_program_counter(target_address)
         .with_cycles_count(6);
-    (memory, delta.apply_proc_delta(proc))
+    delta.apply_proc_delta(proc)
 }
 
-fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memory, Mos6510) {
+fn execute_opcode(memory: &mut C64Memory, mut proc: Mos6510, op_code: u8) -> Mos6510 {
     proc = ProcDelta::empty()
             .with_address_mode(get_mode(&op_code))
             .apply_proc_delta(proc);
     match op_code {
         //Arith
-        0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xEA | 0xFA => (memory, nop(proc)),
+        0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xEA | 0xFA => nop(proc),
         0x01 | 0x05 | 0x09 | 0x0D | 0x11 | 0x15 | 0x19 | 0x1D => ora(memory, proc),
         0x29 | 0x2D | 0x3D | 0x39 | 0x25 | 0x35 | 0x21 | 0x31 => and(memory, proc),
         0x0B | 0x2B => anc(memory, proc),
@@ -1130,12 +1128,12 @@ fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memo
         0x86 | 0x96 | 0x8E => stx(memory, proc),
         0xA0 | 0xA4 | 0xB4 | 0xAC | 0xBC => ldy(memory, proc),
         0x84 | 0x94 | 0x8C => sty(memory, proc),
-        0xAA => (memory, tax(proc)),
-        0x8A => (memory, txa(proc)),
-        0xA8 => (memory, tay(proc)),
-        0x98 => (memory, tya(proc)),
-        0xBA => (memory, tsx(proc)),
-        0x9A => (memory, txs(proc)),
+        0xAA => tax(proc),
+        0x8A => txa(proc),
+        0xA8 => tay(proc),
+        0x98 => tya(proc),
+        0xBA => tsx(proc),
+        0x9A => txs(proc),
         0x68 => pla(memory, proc), 
         0x48 => pha(memory, proc), 
         0x28 => plp(memory, proc), 
@@ -1172,7 +1170,7 @@ fn execute_opcode(memory: C64Memory, mut proc: Mos6510, op_code: u8) -> (C64Memo
 
 
 #[allow(dead_code)]
-fn process_control_loop(memory: C64Memory, proc: Mos6510) -> (C64Memory, Mos6510) {
+fn process_control_loop(memory: &mut C64Memory, proc: Mos6510) -> Mos6510 {
     let op_code = memory.read_byte(proc.program_counter);
     execute_opcode(memory, proc, op_code)
 }
@@ -1226,10 +1224,9 @@ async fn main() {
         feed_typed_input(&mut memory, &proc, &mut options.typed_input);
 
         let interrupt_start_cycles = proc.cycles_count;
-        let pending_interrupt = service_pending_interrupt(memory, proc);
-        memory = pending_interrupt.0;
-        proc = pending_interrupt.1;
-        if pending_interrupt.2 {
+        let pending_interrupt = service_pending_interrupt(&mut memory, proc);
+        proc = pending_interrupt.0;
+        if pending_interrupt.1 {
             memory.tick(proc.cycles_count - interrupt_start_cycles);
             i += 1;
             continue;
@@ -1298,11 +1295,10 @@ async fn main() {
             .watch_stack_word
             .map(|address| read_raw_word(&memory, address));
         let instruction_start_cycles = proc.cycles_count;
-        let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(memory, proc, op_code)));
+        let execution = panic::catch_unwind(AssertUnwindSafe(|| execute_opcode(&mut memory, proc, op_code)));
         match execution {
             Ok(res) => {
-                memory = res.0;
-                proc = res.1;
+                proc = res;
                 memory.tick(proc.cycles_count - instruction_start_cycles);
                 has_entered_rom = has_entered_rom || is_rom_address(proc.program_counter);
 

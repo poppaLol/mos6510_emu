@@ -16,16 +16,16 @@ fn irq_vectors_through_fffe_and_pushes_current_pc() {
     mem.ram[0xFFFF] = 0x56;
     let cpu = cpu_at(0x1234);
 
-    let res = interrupt(mem, cpu, Interrupt::Irq, false);
+    let res = interrupt(&mut mem, cpu, Interrupt::Irq, false);
 
-    assert_eq!(res.1.program_counter, 0x5678);
-    assert_eq!(res.1.stack_pointer, 0xFC);
-    assert_eq!(res.0.ram[0x01FF], 0x12);
-    assert_eq!(res.0.ram[0x01FE], 0x34);
-    assert_eq!(res.0.ram[0x01FD], Flags::ALWAYS.bits());
-    assert!(res.1.processor_status.contains(Flags::I_FLAG));
-    assert!(!res.1.processor_status.contains(Flags::B_FLAG));
-    assert_eq!(res.1.cycles_count, 7);
+    assert_eq!(res.program_counter, 0x5678);
+    assert_eq!(res.stack_pointer, 0xFC);
+    assert_eq!(mem.ram[0x01FF], 0x12);
+    assert_eq!(mem.ram[0x01FE], 0x34);
+    assert_eq!(mem.ram[0x01FD], Flags::ALWAYS.bits());
+    assert!(res.processor_status.contains(Flags::I_FLAG));
+    assert!(!res.processor_status.contains(Flags::B_FLAG));
+    assert_eq!(res.cycles_count, 7);
 }
 
 #[test]
@@ -36,11 +36,11 @@ fn nmi_vectors_through_fffa_even_when_irq_disabled() {
     let mut cpu = cpu_at(0x2000);
     cpu.processor_status |= Flags::I_FLAG;
 
-    let res = interrupt(mem, cpu, Interrupt::Nmi, false);
+    let res = interrupt(&mut mem, cpu, Interrupt::Nmi, false);
 
-    assert_eq!(res.1.program_counter, 0xC000);
-    assert_eq!(res.0.ram[0x01FE], 0x00);
-    assert_eq!(res.0.ram[0x01FD], (Flags::ALWAYS | Flags::I_FLAG).bits());
+    assert_eq!(res.program_counter, 0xC000);
+    assert_eq!(mem.ram[0x01FE], 0x00);
+    assert_eq!(mem.ram[0x01FD], (Flags::ALWAYS | Flags::I_FLAG).bits());
 }
 
 #[test]
@@ -54,10 +54,10 @@ fn pending_irq_is_ignored_when_interrupt_disable_flag_is_set() {
     let mut cpu = cpu_at(0x2000);
     cpu.processor_status |= Flags::I_FLAG;
 
-    let res = service_pending_interrupt(mem, cpu);
+    let res = service_pending_interrupt(&mut mem, cpu);
 
-    assert!(!res.2);
-    assert_eq!(res.1.program_counter, 0x2000);
+    assert!(!res.1);
+    assert_eq!(res.0.program_counter, 0x2000);
 }
 
 #[test]
@@ -72,10 +72,10 @@ fn pending_irq_is_serviced_when_interrupt_disable_flag_is_clear() {
     mem.tick(1);
     let cpu = cpu_at(0x2000);
 
-    let res = service_pending_interrupt(mem, cpu);
+    let res = service_pending_interrupt(&mut mem, cpu);
 
-    assert!(res.2);
-    assert_eq!(res.1.program_counter, 0xEA00);
+    assert!(res.1);
+    assert_eq!(res.0.program_counter, 0xEA00);
 }
 
 #[test]
@@ -88,10 +88,10 @@ fn rti_restores_status_and_program_counter_from_stack() {
     cpu.stack_pointer = 0xFC;
     cpu.processor_status = Flags::ALWAYS | Flags::I_FLAG;
 
-    let res = rti(mem, cpu);
+    let res = rti(&mut mem, cpu);
 
-    assert_eq!(res.1.program_counter, 0x1234);
-    assert_eq!(res.1.stack_pointer, 0xFF);
-    assert_eq!(res.1.processor_status, Flags::ALWAYS | Flags::C_FLAG);
-    assert_eq!(res.1.cycles_count, 6);
+    assert_eq!(res.program_counter, 0x1234);
+    assert_eq!(res.stack_pointer, 0xFF);
+    assert_eq!(res.processor_status, Flags::ALWAYS | Flags::C_FLAG);
+    assert_eq!(res.cycles_count, 6);
 }

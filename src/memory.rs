@@ -7,7 +7,7 @@ const BASIC_ROM_OFFSET: u16 = 0xA000;
 const CHAR_ROM_OFFSET: u16 = 0xD000;
 const KERN_ROM_OFFSET: u16 = 0xE000;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct C64Memory {
     pub ram: [u8; 0x10000],
     pub basic_rom: [u8; 0x2000],
