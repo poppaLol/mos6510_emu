@@ -76,6 +76,9 @@ fn pending_irq_is_serviced_when_interrupt_disable_flag_is_clear() {
 
     assert!(res.1);
     assert_eq!(res.0.program_counter, 0xEA00);
+    assert!(mem.irq_pending());
+    assert_eq!(mem.cia1.read_byte(0xDC0D), 0x81);
+    assert!(!mem.irq_pending());
 }
 
 #[test]

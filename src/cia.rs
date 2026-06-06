@@ -17,7 +17,7 @@ const CONTROL_START: u8 = 0x01;
 const CONTROL_ONE_SHOT: u8 = 0x08;
 const CONTROL_FORCE_LOAD: u8 = 0x10;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct Cia {
     registers: [u8; 0x10],
     port_a_inputs: u8,
@@ -26,7 +26,7 @@ pub struct Cia {
     timer_a_counter: u16,
     timer_a_latch: u16,
     interrupt_mask: u8,
-    interrupt_pending: u8,
+    interrupt_pending: Cell<u8>,
 }
 
 impl Cia {
@@ -39,7 +39,7 @@ impl Cia {
             timer_a_counter: 0,
             timer_a_latch: 0,
             interrupt_mask: 0,
-            interrupt_pending: 0,
+            interrupt_pending: Cell::new(0),
         }
     }
 
@@ -122,15 +122,12 @@ impl Cia {
     }
 
     pub fn irq_pending(&self) -> bool {
-        self.interrupt_pending & self.interrupt_mask != 0
-    }
-
-    pub fn acknowledge_irq(&mut self) {
-        self.interrupt_pending = 0;
+        self.interrupt_pending.get() & self.interrupt_mask != 0
     }
 
     fn timer_a_underflow(&mut self) {
-        self.interrupt_pending |= INTERRUPT_TIMER_A;
+        self.interrupt_pending
+            .set(self.interrupt_pending.get() | INTERRUPT_TIMER_A);
         self.timer_a_counter = self.timer_a_latch;
         if self.registers[CONTROL_A] & CONTROL_ONE_SHOT != 0 {
             self.registers[CONTROL_A] &= !CONTROL_START;
@@ -138,7 +135,7 @@ impl Cia {
     }
 
     fn read_interrupt_control(&self) -> u8 {
-        let pending = self.interrupt_pending;
+        let pending = self.interrupt_pending.replace(0);
         if pending & self.interrupt_mask != 0 {
             pending | 0x80
         } else {
@@ -259,7 +256,6 @@ mod tests {
 
         assert!(cia.irq_pending());
         assert_eq!(cia.read_byte(0xDC0D), 0x81);
-        cia.acknowledge_irq();
         assert!(!cia.irq_pending());
     }
 
@@ -277,3 +273,4 @@ mod tests {
         assert_eq!(cia.read_byte(0xDC0D), 0x01);
     }
 }
+use std::cell::Cell;

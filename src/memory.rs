@@ -189,11 +189,6 @@ impl C64Memory {
     self.cia1.irq_pending()
   }
 
-  pub fn acknowledge_irq(&mut self) {
-    self.cia1.acknowledge_irq();
-  }
-
-  
   pub fn stack_push_word(&mut self, ptr: usize, val: u16) {
     //stack is 0x100 to 0x1FF - and pointer is u8 so have to add 0x100 to it
     let offset_ptr = ptr + 0x100;
@@ -213,17 +208,12 @@ impl C64Memory {
   pub fn stack_pop_word(&mut self, ptr: u16) -> u16 {
     let low_ptr = 0x100 + (ptr as u8).wrapping_add(1) as u16;
     let high_ptr = 0x100 + (ptr as u8).wrapping_add(2) as u16;
-    let result = (self.read_byte(high_ptr) as u16) << 8 | self.read_byte(low_ptr) as u16;
-    self.write_byte(&(low_ptr as usize), 0u8);
-    self.write_byte(&(high_ptr as usize), 0u8);
-    result
+    (self.read_byte(high_ptr) as u16) << 8 | self.read_byte(low_ptr) as u16
   }
 
   pub fn stack_pop_byte(&mut self, ptr: u16) -> u8 {
     let offset_ptr = 0x100 + (ptr as u8).wrapping_add(1) as u16;
-    let result = self.read_byte(offset_ptr);
-    self.write_byte(&(offset_ptr as usize), 0u8);
-    result
+    self.read_byte(offset_ptr)
   }
 }
 
@@ -350,12 +340,12 @@ mod tests {
   }
 
   #[test]
-  fn when_pop_byte_from_stack_mem_cleared() {
+  fn popping_byte_leaves_stack_memory_unchanged() {
     let mut mem = C64Memory::get_empty_mem();
     mem.stack_push_byte(255, 1);
 
     mem.stack_pop_byte(254);
-    assert_eq!(mem.ram[0x1FF], 0)
+    assert_eq!(mem.ram[0x1FF], 1)
   }
 
   #[test]
@@ -377,12 +367,12 @@ mod tests {
   }
   
   #[test]
-  fn when_pop_word_from_stack_mem_cleared() {
+  fn popping_word_leaves_stack_memory_unchanged() {
     let mut mem = C64Memory::get_empty_mem();
     mem.stack_push_word(255, 258);
 
     mem.stack_pop_word(253);
-    assert_eq!(mem.ram[0x1FF], 0);
-    assert_eq!(mem.ram[0x1FE], 0)
+    assert_eq!(mem.ram[0x1FF], 1);
+    assert_eq!(mem.ram[0x1FE], 2)
   }
 }
