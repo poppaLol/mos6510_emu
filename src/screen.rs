@@ -34,13 +34,14 @@ pub fn screen_code_to_ascii(code: u8) -> char {
         0x5F => '_',
         0x60 => '-',
         0x61..=0x7A => (b'A' + code - 0x61) as char,
+        0xA0 => '█',
         _ => '.',
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{render_text_screen, SCREEN_HEIGHT, SCREEN_WIDTH};
+    use super::{render_text_screen, screen_code_to_ascii, SCREEN_HEIGHT, SCREEN_WIDTH};
     use crate::memory::C64Memory;
 
     #[test]
@@ -64,5 +65,10 @@ mod tests {
         let rendered = render_text_screen(&mem);
 
         assert!(rendered.contains("|HI!"));
+    }
+
+    #[test]
+    fn renders_inverse_space_as_cursor_block() {
+        assert_eq!(screen_code_to_ascii(0xA0), '█');
     }
 }

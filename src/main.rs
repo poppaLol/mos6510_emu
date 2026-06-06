@@ -15,8 +15,12 @@ use screen::{render_text_screen, screen_code_to_ascii, SCREEN_HEIGHT, SCREEN_RAM
 use std::num::Wrapping;
 use std::collections::VecDeque;
 use std::env;
+use std::io::{self, Read, Write};
 use std::panic::{self, AssertUnwindSafe};
-use round::round_down;
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
 use tokio::time;
 
 const UPPER_BIT_POS: u8 = 0b10000000;
@@ -26,8 +30,14 @@ const RESET_VECTOR: u16 = 0xFFFC;
 const IRQ_BRK_VECTOR: u16 = 0xFFFE;
 const KEYBOARD_BUFFER_COUNT: usize = 0x00C6;
 const KEYBOARD_BUFFER_START: usize = 0x0277;
+const KERNAL_STOP_KEY: usize = 0x0091;
 const KEYBOARD_WAIT_START: u16 = 0xE5CD;
 const KEYBOARD_WAIT_END: u16 = 0xE5D4;
+const PAL_CLOCK_HZ: f64 = 985_000.0;
+const PACE_CYCLES: usize = 9_850;
+const LIVE_SCREEN_FRAME_TIME: Duration = Duration::from_millis(50);
+const PETSCII_RETURN: u8 = 0x0D;
+const PETSCII_DELETE: u8 = 0x14;
 
 #[allow(dead_code)]
 enum Interrupt {
@@ -41,6 +51,7 @@ struct BootOptions {
     trace_memory: bool,
     verbose: bool,
     screen: bool,
+    live_screen: bool,
     stop_on_brk: bool,
     stop_outside_rom: bool,
     stop_pc: Option<u16>,
@@ -49,6 +60,7 @@ struct BootOptions {
     watch_stack_value: Option<u16>,
     dump_zero_page: bool,
     dump_screen_ram: bool,
+    dump_memory: Option<(usize, usize)>,
     typed_input: VecDeque<u8>,
 }
 
@@ -141,6 +153,7 @@ fn parse_boot_options() -> BootOptions {
     let mut trace_memory = false;
     let mut verbose = false;
     let mut screen = false;
+    let mut live_screen = false;
     let mut stop_on_brk = false;
     let mut stop_outside_rom = false;
     let mut stop_pc = None;
@@ -149,6 +162,7 @@ fn parse_boot_options() -> BootOptions {
     let mut watch_stack_value = None;
     let mut dump_zero_page = false;
     let mut dump_screen_ram = false;
+    let mut dump_memory = None;
     let mut typed_input = VecDeque::new();
     let mut args = env::args().skip(1);
 
@@ -156,6 +170,9 @@ fn parse_boot_options() -> BootOptions {
         match arg.as_str() {
             "--screen" => {
                 screen = true;
+            },
+            "--live-screen" => {
+                live_screen = true;
             },
             "--stop-on-brk" => {
                 stop_on_brk = true;
@@ -221,6 +238,18 @@ fn parse_boot_options() -> BootOptions {
             "--dump-screen-ram" => {
                 dump_screen_ram = true;
             },
+            "--dump-memory" => {
+                let start = args.next().unwrap_or_else(|| {
+                    panic!("--dump-memory requires a start address");
+                });
+                let len = args.next().unwrap_or_else(|| {
+                    panic!("--dump-memory requires a length");
+                });
+                dump_memory = Some((
+                    parse_u16_arg(&start, "--dump-memory start") as usize,
+                    parse_u16_arg(&len, "--dump-memory length") as usize,
+                ));
+            },
             "--type" => {
                 let value = args.next().unwrap_or_else(|| {
                     panic!("--type requires a value");
@@ -237,6 +266,7 @@ fn parse_boot_options() -> BootOptions {
         trace_memory,
         verbose,
         screen,
+        live_screen,
         stop_on_brk,
         stop_outside_rom,
         stop_pc,
@@ -245,6 +275,7 @@ fn parse_boot_options() -> BootOptions {
         watch_stack_value,
         dump_zero_page,
         dump_screen_ram,
+        dump_memory,
         typed_input,
     }
 }
@@ -253,6 +284,140 @@ fn print_screen_snapshot(memory: &C64Memory, options: &BootOptions) {
     if options.screen {
         println!("C64 text screen:");
         println!("{}", render_text_screen(memory));
+    }
+}
+
+struct LiveTerminal {
+    last_frame: String,
+    original_terminal_mode: String,
+    input: Receiver<LiveKey>,
+}
+
+#[derive(Debug, PartialEq)]
+enum LiveKey {
+    Input(u8),
+    Stop,
+    Quit,
+}
+
+impl LiveTerminal {
+    fn start() -> LiveTerminal {
+        let terminal_mode = Command::new("stty")
+            .arg("-g")
+            .stdin(Stdio::inherit())
+            .output()
+            .expect("failed to inspect terminal mode");
+        assert!(
+            terminal_mode.status.success(),
+            "failed to inspect terminal mode"
+        );
+        let original_terminal_mode = String::from_utf8(terminal_mode.stdout)
+        .expect("terminal mode was not valid UTF-8")
+        .trim()
+        .to_string();
+        assert!(!original_terminal_mode.is_empty(), "terminal mode was empty");
+
+        let status = Command::new("stty")
+            .args(["raw", "-echo"])
+            .stdin(Stdio::inherit())
+            .status()
+            .expect("failed to enable raw terminal mode");
+        assert!(status.success(), "failed to enable raw terminal mode");
+
+        let (sender, input) = mpsc::channel();
+        thread::spawn(move || {
+            for byte in io::stdin().bytes() {
+                let byte = match byte {
+                    Ok(byte) => byte,
+                    Err(_) => break,
+                };
+                if let Some(key) = map_live_key(byte) {
+                    let should_quit = matches!(key, LiveKey::Quit);
+                    if sender.send(key).is_err() || should_quit {
+                        break;
+                    }
+                }
+            }
+        });
+
+        print!("\x1b[2J\x1b[H\x1b[?25l");
+        io::stdout().flush().unwrap();
+        LiveTerminal {
+            last_frame: String::new(),
+            original_terminal_mode,
+            input,
+        }
+    }
+
+    fn read_input(&self, memory: &mut C64Memory, typed_input: &mut VecDeque<u8>) -> bool {
+        let mut quit = false;
+        while let Ok(key) = self.input.try_recv() {
+            match key {
+                LiveKey::Input(value) => typed_input.push_back(value),
+                LiveKey::Stop => memory.ram[KERNAL_STOP_KEY] = 0x7F,
+                LiveKey::Quit => quit = true,
+            }
+        }
+        quit
+    }
+
+    fn render(&mut self, memory: &C64Memory) {
+        let frame = render_text_screen(memory);
+        if frame == self.last_frame {
+            return;
+        }
+
+        print!(
+            "\x1b[H{}\r\nEsc: RUN/STOP  Ctrl+C: exit\x1b[J",
+            terminal_line_endings(&frame)
+        );
+        io::stdout().flush().unwrap();
+        self.last_frame = frame;
+    }
+}
+
+impl Drop for LiveTerminal {
+    fn drop(&mut self) {
+        print!("\x1b[?25h\r\n");
+        let _ = io::stdout().flush();
+        let _ = Command::new("stty")
+            .arg(&self.original_terminal_mode)
+            .stdin(Stdio::inherit())
+            .status();
+    }
+}
+
+fn terminal_line_endings(text: &str) -> String {
+    text.replace('\n', "\r\n")
+}
+
+fn map_live_key(key: u8) -> Option<LiveKey> {
+    match key {
+        0x03 => Some(LiveKey::Quit),
+        0x1B => Some(LiveKey::Stop),
+        b'a'..=b'z' => Some(LiveKey::Input(key.to_ascii_uppercase())),
+        b'A'..=b'Z'
+        | b'0'..=b'9'
+        | b' '
+        | b'"'
+        | b'='
+        | b'+'
+        | b'-'
+        | b'*'
+        | b'/'
+        | b'('
+        | b')'
+        | b'.'
+        | b','
+        | b';'
+        | b':'
+        | b'<'
+        | b'>' => {
+            Some(LiveKey::Input(key))
+        },
+        b'\r' | b'\n' => Some(LiveKey::Input(PETSCII_RETURN)),
+        0x08 | 0x7F => Some(LiveKey::Input(PETSCII_DELETE)),
+        _ => None,
     }
 }
 
@@ -313,6 +478,10 @@ fn print_checkpoint_diagnostics(memory: &C64Memory, options: &BootOptions) {
     print_screen_snapshot(memory, options);
     print_zero_page_dump(memory, options);
     print_screen_ram_dump(memory, options);
+    if let Some((start, len)) = options.dump_memory {
+        println!("RAM dump:");
+        print_hex_dump(memory, start, len);
+    }
 }
 
 fn remember_trace(trace: &mut VecDeque<TraceEntry>, entry: TraceEntry, max_len: usize) {
@@ -1066,7 +1235,6 @@ fn interrupt(memory: &mut C64Memory, mut proc: Mos6510, interrupt: Interrupt, br
 
 fn service_pending_interrupt(memory: &mut C64Memory, proc: Mos6510) -> (Mos6510, bool) {
     if memory.irq_pending() && !proc.processor_status.contains(Flags::I_FLAG) {
-        memory.acknowledge_irq();
         (interrupt(memory, proc, Interrupt::Irq, false), true)
     } else {
         (proc, false)
@@ -1189,15 +1357,17 @@ async fn main() {
         .with_program_counter(pc)
         .with_cycles_count(6)
         .apply_proc_delta(Mos6510::boot_up());
-    
-    let pal_duration = round_down(1.0/985_000.0*1_000_000_000.0,0) as u64;
-    //let ntsc_duration = round_down(1.0/1_023_000.0*1_000_000_000.0,0) as u64;
 
-    let mut interval = time::interval(time::Duration::from_nanos(pal_duration));
     let mut i = 0;
     let collect_trace = trace_enabled(&options);
     let mut trace = VecDeque::with_capacity(options.trace_tail);
     let mut has_entered_rom = is_rom_address(proc.program_counter);
+    let emulation_start = Instant::now();
+    let starting_cycles = proc.cycles_count;
+    let mut next_pace_cycles = proc.cycles_count + PACE_CYCLES;
+    let mut next_live_frame = Instant::now();
+    let mut live_terminal = options.live_screen.then(LiveTerminal::start);
+
     loop {
         if let Some(max_instructions) = options.max_instructions {
             if i >= max_instructions {
@@ -1217,8 +1387,14 @@ async fn main() {
             println!("({})", i);
             print!("{:#06x} ", proc.program_counter);
         }
-        if options.max_instructions.is_none() {
-            interval.tick().await;
+
+        if live_terminal
+            .as_ref()
+            .map_or(false, |terminal| {
+                terminal.read_input(&mut memory, &mut options.typed_input)
+            })
+        {
+            break;
         }
 
         feed_typed_input(&mut memory, &proc, &mut options.typed_input);
@@ -1339,6 +1515,24 @@ async fn main() {
         }
         
         i+=1;
+
+        if let Some(terminal) = live_terminal.as_mut() {
+            if Instant::now() >= next_live_frame {
+                terminal.render(&memory);
+                next_live_frame = Instant::now() + LIVE_SCREEN_FRAME_TIME;
+            }
+        }
+
+        if options.max_instructions.is_none() && proc.cycles_count >= next_pace_cycles {
+            let emulated_time =
+                Duration::from_secs_f64((proc.cycles_count - starting_cycles) as f64 / PAL_CLOCK_HZ);
+            let delay = emulated_time.saturating_sub(emulation_start.elapsed());
+
+            time::sleep(delay).await;
+
+            next_pace_cycles = proc.cycles_count + PACE_CYCLES;
+        }
+
         if options.verbose {
             print!(" ----- AddressMode {:?}", proc.addressing_mode);
             if i > 5 && proc.stack_pointer < 1 {

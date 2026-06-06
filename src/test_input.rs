@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 
 use super::{
-    feed_typed_input, get_cpu, parse_typed_input, C64Memory, KEYBOARD_BUFFER_COUNT,
-    KEYBOARD_BUFFER_START,
+    feed_typed_input, get_cpu, map_live_key, parse_typed_input, C64Memory, LiveKey,
+    KEYBOARD_BUFFER_COUNT, KEYBOARD_BUFFER_START, PETSCII_DELETE, PETSCII_RETURN,
+    terminal_line_endings,
 };
 
 #[test]
@@ -36,4 +37,39 @@ fn feed_typed_input_waits_when_keyboard_buffer_is_not_empty() {
 
     assert!(!feed_typed_input(&mut mem, &cpu, &mut input));
     assert_eq!(input, VecDeque::from(vec![b'A']));
+}
+
+#[test]
+fn live_keyboard_accepts_uppercase_alphanumeric_and_space() {
+    assert_eq!(map_live_key(b'a'), Some(LiveKey::Input(b'A')));
+    assert_eq!(map_live_key(b'Z'), Some(LiveKey::Input(b'Z')));
+    assert_eq!(map_live_key(b'7'), Some(LiveKey::Input(b'7')));
+    assert_eq!(map_live_key(b' '), Some(LiveKey::Input(b' ')));
+    assert_eq!(map_live_key(b'"'), Some(LiveKey::Input(b'"')));
+    assert_eq!(map_live_key(b'='), Some(LiveKey::Input(b'=')));
+    assert_eq!(map_live_key(b'+'), Some(LiveKey::Input(b'+')));
+    assert_eq!(map_live_key(b'-'), Some(LiveKey::Input(b'-')));
+    assert_eq!(map_live_key(b'*'), Some(LiveKey::Input(b'*')));
+    assert_eq!(map_live_key(b'/'), Some(LiveKey::Input(b'/')));
+    assert_eq!(map_live_key(b';'), Some(LiveKey::Input(b';')));
+    assert_eq!(map_live_key(b':'), Some(LiveKey::Input(b':')));
+    assert_eq!(map_live_key(b'>'), Some(LiveKey::Input(b'>')));
+}
+
+#[test]
+fn live_keyboard_maps_terminal_control_keys_to_petscii() {
+    assert_eq!(map_live_key(b'\n'), Some(LiveKey::Input(PETSCII_RETURN)));
+    assert_eq!(map_live_key(0x7F), Some(LiveKey::Input(PETSCII_DELETE)));
+    assert_eq!(map_live_key(0x1B), Some(LiveKey::Stop));
+    assert_eq!(map_live_key(0x03), Some(LiveKey::Quit));
+}
+
+#[test]
+fn live_keyboard_ignores_unsupported_punctuation() {
+    assert_eq!(map_live_key(b'!'), None);
+}
+
+#[test]
+fn live_terminal_uses_carriage_return_line_feed_in_raw_mode() {
+    assert_eq!(terminal_line_endings("ONE\nTWO"), "ONE\r\nTWO");
 }
